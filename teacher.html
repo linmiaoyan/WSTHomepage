@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/css/bootstrap-icons.css" />
   <style>
     body { background: #f6f8fb; }
-    .wrap { max-width: 760px; margin: 26px auto; padding: 0 14px; }
+    .wrap { max-width: 1000px; margin: 26px auto; padding: 0 20px; }
     .cardx { background: var(--bg-white); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
     .muted { color: var(--text-secondary); font-size: 13px; }
     #status.ok { color: var(--success-color); }
@@ -17,49 +17,101 @@
     textarea { resize: vertical; }
     pre { white-space: pre-wrap; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    /* 与「自然语言解析」区分开的独立区域 */
-    .section-seal { border-left: 4px solid var(--primary-blue, #2563eb); margin-top: 1.25rem; }
+    /* 与管理中心 index.html 一致的标签栏 */
+    .tab-bar {
+      max-width: 1000px;
+      margin: 0 auto 10px;
+      padding: 0 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      border: 1px solid var(--border-color);
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--bg-white);
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+    .tab-btn.active {
+      background: var(--primary-blue);
+      color: #fff;
+      border-color: var(--primary-blue);
+    }
+    .teacher-panel-wrap {
+      max-width: 1000px;
+      margin: 0 auto 24px;
+      padding: 0 20px;
+    }
+    .teacher-panel {
+      display: none;
+    }
+    .teacher-panel.active {
+      display: block;
+    }
+    .teacher-seal-frame {
+      width: 100%;
+      height: min(78vh, 820px);
+      min-height: 520px;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      background: #fff;
+    }
+    .admin-entry-col {
+      flex: 0 0 auto;
+      padding-top: 2px;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="cardx mb-3">
-      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div>
-          <div class="h5 mb-1"><i class="bi bi-chat-square-text"></i> 教师申请</div>
-          <div class="muted">本页分两块：<strong>上方</strong>为自然语言解析后入队；<strong>下方</strong>为校章申请（与解析无关）。右上角 <strong>管理员入口</strong> 进入后台。</div>
+      <div class="d-flex align-items-start flex-wrap gap-3">
+        <!-- 管理员入口：卡片最左侧独立一列 -->
+        <div class="admin-entry-col">
+          <a class="btn btn-outline-secondary btn-sm" href="/index.html" target="_blank" rel="noopener" title="管理中心"><i class="bi bi-person-badge"></i> 管理员入口</a>
         </div>
-        <div class="d-flex flex-column align-items-end gap-1">
+        <div class="flex-grow-1" style="min-width: 200px;">
+          <div class="h5 mb-1"><i class="bi bi-chat-square-text"></i> 教师申请</div>
+          <div class="muted mb-0">使用下方标签切换：<strong>快速申请</strong>（一句话解析入队）、<strong>校章申请</strong>（上传 PDF 选点）。左侧为管理员后台入口。</div>
+        </div>
+        <div class="d-flex flex-column align-items-end gap-1 ms-md-auto">
           <div class="d-flex gap-2 flex-wrap align-items-center justify-content-end">
             <span class="muted" id="meHint">未登录</span>
             <button type="button" class="btn btn-primary btn-sm" id="h5LoginBtn" style="display:none;"><i class="bi bi-lightning-charge"></i> 钉钉内登录</button>
             <a class="btn btn-outline-primary btn-sm" id="loginBtn" href="/auth/dingtalk/login?next=%2Fteacher.html"><i class="bi bi-qr-code-scan"></i> 钉钉扫码登录</a>
             <a class="btn btn-outline-secondary btn-sm" id="logoutBtn" href="/auth/logout" style="display:none;"><i class="bi bi-box-arrow-right"></i> 退出</a>
-            <a class="btn btn-outline-secondary btn-sm" href="/index.html" target="_blank" rel="noopener"><i class="bi bi-person-badge"></i> 管理员入口</a>
           </div>
           <div class="muted small text-end" id="dingtalkEnvHint" style="max-width: 420px;"></div>
         </div>
       </div>
     </div>
+  </div>
 
-    <div class="cardx mb-3">
-      <div class="mb-2"><b>自然语言申请（解析入队）</b></div>
-      <div class="muted small mb-2">仅用于一句话描述需求；与下方「校章申请」无关。</div>
-      <textarea id="nlpText" class="form-control" rows="3" placeholder="例如：帮我给周秀东加一个临时车牌 浙CDJ9405 开一年"></textarea>
-      <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
-        <button class="btn btn-primary" id="parseBtn"><i class="bi bi-magic"></i> 解析</button>
-        <div id="status" class="muted"></div>
+  <div class="tab-bar" id="teacherTabBar" role="tablist">
+    <button type="button" class="tab-btn active" id="tabQuick" data-panel="panelQuick" role="tab" aria-selected="true"><i class="bi bi-lightning-charge"></i> 快速申请</button>
+    <button type="button" class="tab-btn" id="tabSeal" data-panel="panelSeal" role="tab" aria-selected="false"><i class="bi bi-patch-check"></i> 校章申请</button>
+  </div>
+
+  <div class="teacher-panel-wrap">
+    <div class="teacher-panel active" id="panelQuick" role="tabpanel" aria-labelledby="tabQuick">
+      <div class="cardx mb-0">
+        <div class="mb-2"><b>自然语言申请（解析入队）</b></div>
+        <div class="muted small mb-2">用一句话描述需求，解析确认后提交到审批队列。</div>
+        <textarea id="nlpText" class="form-control" rows="3" placeholder="例如：帮我给周秀东加一个临时车牌 浙CDJ9405 开一年"></textarea>
+        <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
+          <button class="btn btn-primary" id="parseBtn"><i class="bi bi-magic"></i> 解析</button>
+          <div id="status" class="muted"></div>
+        </div>
       </div>
     </div>
 
-    <div class="cardx mb-3 section-seal">
-      <div class="d-flex flex-column flex-md-row justify-content-between align-items-stretch align-items-md-center gap-3">
-        <div class="flex-grow-1">
-          <div class="h6 mb-1"><i class="bi bi-patch-check"></i> 校章申请</div>
-          <div class="muted mb-0">上传 PDF、在文件上标出盖章位置后提交。此流程<strong>不使用</strong>上方解析框，请在本区域单独办理。</div>
-        </div>
-        <a class="btn btn-primary text-nowrap align-self-md-center" href="/seal.html"><i class="bi bi-file-earmark-pdf"></i> 进入校章申请</a>
-      </div>
+    <div class="teacher-panel" id="panelSeal" role="tabpanel" aria-labelledby="tabSeal">
+      <iframe id="sealFrame" class="teacher-seal-frame" src="" title="校章申请" frameborder="0"></iframe>
+      <div class="muted small mt-2">提示：校章申请在上方区域内完成；也可<a href="/seal.html" target="_blank" rel="noopener">新窗口打开完整页</a>。</div>
     </div>
   </div>
 
@@ -95,11 +147,43 @@
     const modalEl = document.getElementById("parseModal");
     const modal = new bootstrap.Modal(modalEl);
     let lastParsed = null;
+    let sealFrameLoaded = false;
 
     function setStatus(text, type) {
       const el = document.getElementById("status");
       el.textContent = text || "";
       el.className = type ? type : "muted";
+    }
+
+    function initTeacherTabs() {
+      const tabs = document.querySelectorAll("#teacherTabBar .tab-btn");
+      const panels = {
+        panelQuick: document.getElementById("panelQuick"),
+        panelSeal: document.getElementById("panelSeal"),
+      };
+      const sealFrame = document.getElementById("sealFrame");
+
+      tabs.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const pid = btn.getAttribute("data-panel");
+          tabs.forEach(function (b) {
+            b.classList.remove("active");
+            b.setAttribute("aria-selected", "false");
+          });
+          btn.classList.add("active");
+          btn.setAttribute("aria-selected", "true");
+          Object.keys(panels).forEach(function (key) {
+            const p = panels[key];
+            if (!p) return;
+            const on = key === pid;
+            p.classList.toggle("active", on);
+          });
+          if (pid === "panelSeal" && !sealFrameLoaded) {
+            sealFrame.src = "/seal.html?embed=1";
+            sealFrameLoaded = true;
+          }
+        });
+      });
     }
 
     async function loadMe() {
@@ -171,8 +255,8 @@
 
     document.getElementById("parseBtn").addEventListener("click", parseNlp);
     document.getElementById("enqueueBtn").addEventListener("click", enqueue);
+    initTeacherTabs();
     loadMe();
   </script>
 </body>
 </html>
-

@@ -20,23 +20,29 @@
     .stamp { position: absolute; pointer-events: auto; user-select: none; }
     .stamp .lbl { background: rgba(37,99,235,.92); color: #fff; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
     .stamp .del { position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border: none; border-radius: 50%; background: #dc3545; color: #fff; line-height: 18px; font-size: 12px; }
+    /* 嵌入教师页 iframe（?embed=1）时精简顶栏 */
+    body.seal-embed .wrap { max-width: 100%; margin-top: 10px; }
+    body.seal-embed .seal-title-block { display: none !important; }
+    body.seal-embed .seal-back-teacher { display: none !important; }
+    body.seal-embed #sealTopCard { padding-top: 10px; padding-bottom: 10px; margin-bottom: 12px !important; }
+    body.seal-embed #sealTopCard .d-flex { justify-content: flex-end; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="cardx mb-3">
+    <div class="cardx mb-3" id="sealTopCard">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div>
+        <div class="seal-title-block">
           <div class="h5 mb-1"><i class="bi bi-patch-check"></i> 校章申请（上传 PDF + 选盖章位置）</div>
           <div class="muted">此功能只做“申请入队 + 管理员审核”。暂不自动生成盖章后 PDF。</div>
         </div>
-        <div class="d-flex flex-column align-items-end gap-1">
+        <div class="d-flex flex-column align-items-end gap-1 ms-auto">
           <div class="d-flex gap-2 flex-wrap align-items-center justify-content-end">
             <span class="muted" id="meHint">未登录</span>
             <button type="button" class="btn btn-primary btn-sm" id="h5LoginBtn" style="display:none;"><i class="bi bi-lightning-charge"></i> 钉钉内登录</button>
             <a class="btn btn-outline-primary btn-sm" id="loginBtn" href="/auth/dingtalk/login?next=%2Fseal.html"><i class="bi bi-qr-code-scan"></i> 钉钉扫码登录</a>
             <a class="btn btn-outline-secondary btn-sm" id="logoutBtn" href="/auth/logout" style="display:none;"><i class="bi bi-box-arrow-right"></i> 退出</a>
-            <a class="btn btn-outline-secondary btn-sm" href="/teacher.html"><i class="bi bi-arrow-left"></i> 返回教师申请</a>
+            <a class="btn btn-outline-secondary btn-sm seal-back-teacher" href="/teacher.html"><i class="bi bi-arrow-left"></i> 返回教师申请</a>
           </div>
           <div class="muted small text-end" id="dingtalkEnvHint" style="max-width: 420px;"></div>
         </div>
@@ -80,6 +86,11 @@
   <script>if (typeof pdfjsLib !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/pdf.worker.min.js';</script>
   <script src="/js/dingtalk-h5-login.js"></script>
   <script>
+    const SEAL_EMBED = new URLSearchParams(location.search).get('embed') === '1';
+    if (SEAL_EMBED) document.body.classList.add('seal-embed');
+    const SEAL_NEXT_PATH = SEAL_EMBED ? '/seal.html?embed=1' : '/seal.html';
+    const SEAL_NEXT_ENC = encodeURIComponent(SEAL_NEXT_PATH);
+
     const API_SEAL = "/api/seal-request";
     const API_ME = "/api/me";
     const stampPositions = []; // {x,y} PDF points (current single-page)
@@ -91,6 +102,11 @@
 
     function setStatus(t, cls){ const el=document.getElementById('status'); el.textContent=t||''; el.className=cls||'muted'; }
     function setCount(){ document.getElementById('countHint').textContent = '已选：' + stampPositions.length + ' 处'; }
+
+    (function syncLoginNext() {
+      var lb = document.getElementById('loginBtn');
+      if (lb) lb.href = '/auth/dingtalk/login?next=' + SEAL_NEXT_ENC;
+    })();
 
     let loggedIn = false;
     async function loadMe() {
@@ -201,7 +217,7 @@
 
     document.getElementById('enqueueBtn').addEventListener('click', async ()=>{
       if(!loggedIn){
-        window.location.href = "/auth/dingtalk/login?next=%2Fseal.html";
+        window.location.href = "/auth/dingtalk/login?next=" + SEAL_NEXT_ENC;
         return;
       }
       if(!fileObj) return setStatus('请先上传 PDF','err');
@@ -217,7 +233,7 @@
         const r = await fetch(API_SEAL, { method:'POST', body: fd });
         const d = await r.json().catch(()=>({}));
         if (r.status === 401 && d && d.need_login) {
-          window.location.href = "/auth/dingtalk/login?next=%2Fseal.html";
+          window.location.href = "/auth/dingtalk/login?next=" + SEAL_NEXT_ENC;
           return;
         }
         if(!r.ok || !d.ok) { setStatus('提交失败：'+(d.msg||d.detail||r.status),'err'); return; }

@@ -72,7 +72,26 @@ echo.
 
 :PUSH_STEP
 echo [步骤3] 推送到GitHub
-git push origin main
+
+git config --get remote.origin.url >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [错误] 当前仓库还没有配置远程地址 origin。
+    echo.
+    echo 请先在 GitHub 网页上新建一个空仓库，然后在本文件夹打开终端执行下面其中一条（把地址改成你的仓库）：
+    echo.
+    echo   HTTPS:
+    echo   git remote add origin https://github.com/linmiaoyan/KeApprove.git
+    echo.
+    echo   SSH ^(已配置 SSH 密钥时^):
+    echo   git remote add origin git@github.com:linmiaoyan/KeApprove.git
+    echo.
+    echo 添加成功后，再重新运行本脚本。
+    echo.
+    pause
+    exit /b 1
+)
+
+git push -u origin main
 if %errorlevel% equ 0 (
     echo.
     echo ============================================
@@ -86,9 +105,10 @@ if %errorlevel% equ 0 (
     echo [错误] 推送失败
     echo.
     echo 可能的原因：
-    echo 1. 网络连接问题
-    echo 2. 认证失败（需要Personal Access Token）
-    echo 3. 权限不足
+    echo 1. 未配置 origin 或地址错误（可用 git remote -v 检查）
+    echo 2. 网络连接问题
+    echo 3. 认证失败（HTTPS 需 Personal Access Token）
+    echo 4. 无推送权限或 GitHub 上尚未创建该仓库
     echo.
 )
 

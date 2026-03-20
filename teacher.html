@@ -81,8 +81,6 @@
         <div class="d-flex flex-column align-items-end gap-1 ms-md-auto">
           <div class="d-flex gap-2 flex-wrap align-items-center justify-content-end">
             <span class="muted" id="meHint">未登录</span>
-            <button type="button" class="btn btn-primary btn-sm" id="h5LoginBtn" style="display:none;"><i class="bi bi-lightning-charge"></i> 钉钉内登录</button>
-            <a class="btn btn-outline-primary btn-sm" id="loginBtn" href="/auth/dingtalk/login?next=%2Fteacher.html"><i class="bi bi-qr-code-scan"></i> 钉钉扫码登录</a>
             <a class="btn btn-outline-secondary btn-sm" id="logoutBtn" href="/auth/logout" style="display:none;"><i class="bi bi-box-arrow-right"></i> 退出</a>
           </div>
           <div class="muted small text-end" id="dingtalkEnvHint" style="max-width: 420px;"></div>
@@ -191,18 +189,15 @@
         const r = await fetch(API_ME);
         const d = await r.json().catch(()=>({}));
         const hint = document.getElementById("meHint");
-        const loginBtn = document.getElementById("loginBtn");
         const logoutBtn = document.getElementById("logoutBtn");
         if (d && d.logged_in && d.user) {
           const u = d.user;
           hint.textContent = "已登录：" + (u.summary || u.display_name || u.name || u.nick || u.userId || "未知");
           hint.className = "muted";
-          loginBtn.style.display = "none";
           logoutBtn.style.display = "";
         } else {
-          hint.textContent = "未登录（建议先用钉钉扫码）";
+          hint.textContent = "未登录（正在自动免登中；失败请刷新页面重试）";
           hint.className = "muted";
-          loginBtn.style.display = "";
           logoutBtn.style.display = "none";
         }
       } catch (e) {
@@ -240,7 +235,8 @@
         const r = await fetch(API_CREATE, { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify(obj) });
         const d = await r.json().catch(()=>({}));
         if (r.status === 401 && d && d.need_login) {
-          window.location.href = "/auth/dingtalk/login?next=%2Fteacher.html";
+          setStatus("请先完成钉钉内免登（如失败请刷新页面重试）。", "err");
+          if (window.keDingTalkH5Login) window.keDingTalkH5Login();
           return;
         }
         if (!r.ok || !d.ok) { setStatus("入队失败：" + (d.msg || r.status), "err"); return; }

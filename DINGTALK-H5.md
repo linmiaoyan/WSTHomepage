@@ -1,5 +1,11 @@
 # 钉钉：H5 微应用 vs 浏览器扫码登录
 
+## 从钉钉「工作台」打开本站时
+
+工作台是在 **钉钉 App 内置浏览器** 里打开 H5，应使用 **JSAPI 免登**（`requestAuthCode` → 后端 `/api/dingtalk/h5-auth`），**不要**点「扫码登录」去走 `login.dingtalk.com/oauth2`（微应用的 ClientId 常会报 **应用不存在**）。
+
+**必配**：`.env` 中 `DINGTALK_USE_H5_JSAPI=1`，并填写企业 `DINGTALK_CORP_ID`，与当前 H5 微应用同一套 `DINGTALK_CLIENT_ID` / `DINGTALK_CLIENT_SECRET`。改完后**重启** Flask 进程并刷新页面。
+
 ## 为什么 H5 微应用会提示「应用不存在」？
 
 当前仓库里的 **「钉钉登录」** 链接走的是：

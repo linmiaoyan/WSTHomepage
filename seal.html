@@ -39,8 +39,6 @@
         <div class="d-flex flex-column align-items-end gap-1 ms-auto">
           <div class="d-flex gap-2 flex-wrap align-items-center justify-content-end">
             <span class="muted" id="meHint">未登录</span>
-            <button type="button" class="btn btn-primary btn-sm" id="h5LoginBtn" style="display:none;"><i class="bi bi-lightning-charge"></i> 钉钉内登录</button>
-            <a class="btn btn-outline-primary btn-sm" id="loginBtn" href="/auth/dingtalk/login?next=%2Fseal.html"><i class="bi bi-qr-code-scan"></i> 钉钉扫码登录</a>
             <a class="btn btn-outline-secondary btn-sm" id="logoutBtn" href="/auth/logout" style="display:none;"><i class="bi bi-box-arrow-right"></i> 退出</a>
             <a class="btn btn-outline-secondary btn-sm seal-back-teacher" href="/teacher.html"><i class="bi bi-arrow-left"></i> 返回教师申请</a>
           </div>
@@ -88,9 +86,6 @@
   <script>
     const SEAL_EMBED = new URLSearchParams(location.search).get('embed') === '1';
     if (SEAL_EMBED) document.body.classList.add('seal-embed');
-    const SEAL_NEXT_PATH = SEAL_EMBED ? '/seal.html?embed=1' : '/seal.html';
-    const SEAL_NEXT_ENC = encodeURIComponent(SEAL_NEXT_PATH);
-
     const API_SEAL = "/api/seal-request";
     const API_ME = "/api/me";
     const stampPositions = []; // {x,y} PDF points (current single-page)
@@ -103,29 +98,21 @@
     function setStatus(t, cls){ const el=document.getElementById('status'); el.textContent=t||''; el.className=cls||'muted'; }
     function setCount(){ document.getElementById('countHint').textContent = '已选：' + stampPositions.length + ' 处'; }
 
-    (function syncLoginNext() {
-      var lb = document.getElementById('loginBtn');
-      if (lb) lb.href = '/auth/dingtalk/login?next=' + SEAL_NEXT_ENC;
-    })();
-
     let loggedIn = false;
     async function loadMe() {
       try {
         const r = await fetch(API_ME);
         const d = await r.json().catch(()=>({}));
         const hint = document.getElementById("meHint");
-        const loginBtn = document.getElementById("loginBtn");
         const logoutBtn = document.getElementById("logoutBtn");
         if (d && d.logged_in && d.user) {
           const u = d.user;
           loggedIn = true;
           hint.textContent = "已登录：" + (u.summary || u.display_name || u.name || u.nick || u.userId || "未知");
-          loginBtn.style.display = "none";
           logoutBtn.style.display = "";
         } else {
           loggedIn = false;
-          hint.textContent = "未登录（提交前需钉钉扫码）";
-          loginBtn.style.display = "";
+          hint.textContent = "未登录（正在自动免登中；失败请刷新页面重试）";
           logoutBtn.style.display = "none";
         }
       } catch (e) {
@@ -217,7 +204,8 @@
 
     document.getElementById('enqueueBtn').addEventListener('click', async ()=>{
       if(!loggedIn){
-        window.location.href = "/auth/dingtalk/login?next=" + SEAL_NEXT_ENC;
+        setStatus("请先完成钉钉内登录。", "err");
+        if (window.keDingTalkH5Login) window.keDingTalkH5Login();
         return;
       }
       if(!fileObj) return setStatus('请先上传 PDF','err');
@@ -233,7 +221,8 @@
         const r = await fetch(API_SEAL, { method:'POST', body: fd });
         const d = await r.json().catch(()=>({}));
         if (r.status === 401 && d && d.need_login) {
-          window.location.href = "/auth/dingtalk/login?next=" + SEAL_NEXT_ENC;
+          setStatus("登录状态失效，请刷新页面重试。", "err");
+          if (window.keDingTalkH5Login) window.keDingTalkH5Login();
           return;
         }
         if(!r.ok || !d.ok) { setStatus('提交失败：'+(d.msg||d.detail||r.status),'err'); return; }

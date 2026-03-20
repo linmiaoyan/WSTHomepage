@@ -157,8 +157,8 @@ def api_request_parse():
     schema_hint = {
         "type": "add_vehicle",
         "params": {
-            "name": "周秀东",
-            "plate_no": "浙CDJ9405",
+            "name": "林xx",
+            "plate_no": "浙CD12345",
             "plate_type": "1",
             "start_date": "2026-03-19",
             "end_date": "2027-03-19",
@@ -525,48 +525,17 @@ def api_dingtalk_h5_auth():
 
 @app.route("/auth/dingtalk/login", methods=["GET"])
 def auth_dingtalk_login():
-    cfg = _get_dingtalk_cfg()
-    if not cfg["client_id"]:
-        return "DINGTALK_CLIENT_ID not configured", 500
-    nxt = (request.args.get("next") or "/teacher.html").strip() or "/teacher.html"
-    state = uuid.uuid4().hex
-    web_session["dt_oauth_state"] = state
-    web_session["dt_next"] = nxt
-    scope = (_env_get("DINGTALK_OAUTH_SCOPE", "openid") or "openid").strip()
-    params = {
-        "client_id": cfg["client_id"],
-        "redirect_uri": cfg["redirect_uri"],
-        "state": state,
-        "response_type": "code",
-        "prompt": "consent",
-        "scope": scope,
-    }
-    url = "https://login.dingtalk.com/oauth2/auth?" + urlencode(params, safe=":/")
-    return redirect(url)
+    return (
+        "Browser OAuth is disabled. Please open this app inside DingTalk Workbench and use H5 login.",
+        410,
+    )
 
 @app.route("/auth/dingtalk/callback", methods=["GET"])
 def auth_dingtalk_callback():
-    err = (request.args.get("error") or "").strip()
-    if err:
-        return f"dingtalk oauth error: {err}", 400
-    auth_code = (request.args.get("authCode") or request.args.get("code") or "").strip()
-    state = (request.args.get("state") or "").strip()
-    if not auth_code:
-        return "missing authCode", 400
-    if not state or state != web_session.get("dt_oauth_state"):
-        return "bad state", 400
-    try:
-        tok = _dingtalk_user_access_token(auth_code)
-        access_token = (tok.get("accessToken") or "").strip()
-        if not access_token:
-            return "token missing accessToken", 500
-        me = _dingtalk_me(access_token)
-        _dingtalk_put_user_session(tok, me, "browser_oauth")
-        # do not store access token in cookie session (avoid leakage)
-        nxt = web_session.get("dt_next") or "/teacher.html"
-        return redirect(nxt)
-    except Exception as e:
-        return f"dingtalk callback failed: {e}", 500
+    return (
+        "Browser OAuth callback is disabled. Please return to DingTalk Workbench and use H5 login.",
+        410,
+    )
 
 @app.route("/auth/logout", methods=["GET"])
 def auth_logout():
@@ -846,8 +815,8 @@ def api_vehicle_nlp():
         return jsonify({'ok': False, 'msg': 'text 为空'}), 400
 
     schema_hint = {
-        "name": "周秀东",
-        "plate_no": "浙CDJ9405",
+        "name": "周xx",
+        "plate_no": "浙C12345",
         "plate_type": "1",
         "remark": "可选备注",
         "duration_text": "一年",

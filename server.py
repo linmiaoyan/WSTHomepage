@@ -395,6 +395,62 @@ def _dingtalk_user_access_token(code: str):
     # expected: accessToken, expireIn, refreshToken, corpId (optional)
     return j
 
+
+_DT_APP_TOKEN_CACHE = {"token": "", "expires_at": 0}
+
+def _dingtalk_app_access_token(force_refresh: bool = False) -> str:
+    """
+    企业内部应用 access_token（应用级），用于 requestAuthCode 的 code 换取用户身份。
+    """
+    cfg = _get_dingtalk_cfg()
+    if not cfg["client_id"] or not cfg["client_secret"]:
+        raise ValueError("missing DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET")
+    now = int(time.time())
+    if (not force_refresh) and _DT_APP_TOKEN_CACHE["token"] and _DT_APP_TOKEN_CACHE["expires_at"] > now + 30:
+        return _DT_APP_TOKEN_CACHE["token"]
+
+    url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+    payload = {
+        "appKey": cfg["client_id"],
+        "appSecret": cfg["client_secret"],
+    }
+    r = requests.post(url, json=payload, timeout=15)
+    if r.status_code != 200:
+        raise ValueError(f"dingtalk app token http {r.status_code}: {(r.text or '')[:300]}")
+    j = r.json() or {}
+    token = (j.get("accessToken") or "").strip()
+    expires_in = int(j.get("expireIn") or 7200)
+    if not token:
+        raise ValueError("dingtalk app token missing accessToken")
+    _DT_APP_TOKEN_CACHE["token"] = token
+    _DT_APP_TOKEN_CACHE["expires_at"] = now + max(expires_in, 300)
+    return token
+
+
+def _dingtalk_h5_userinfo_by_code(auth_code: str) -> dict:
+    """
+    钉钉工作台 H5：requestAuthCode(code) -> user/getuserinfo（企业内部应用流程）
+    """
+    app_token = _dingtalk_app_access_token()
+    url = "https://oapi.dingtalk.com/user/getuserinfo"
+    r = requests.get(url, params={"access_token": app_token, "code": auth_code}, timeout=15)
+    if r.status_code != 200:
+        raise ValueError(f"dingtalk getuserinfo http {r.status_code}: {(r.text or '')[:300]}")
+    j = r.json() or {}
+    err = j.get("errcode")
+    if err not in (0, "0", None):
+        # 常见：40078（code无效/过期/非本应用签发）
+        raise ValueError(f"dingtalk getuserinfo errcode={j.get('errcode')} errmsg={j.get('errmsg')}")
+    uid = str(j.get("userid") or j.get("userId") or "").strip()
+    if not uid:
+        raise ValueError("dingtalk getuserinfo missing userid")
+    prof = {
+        "userId": uid,
+        "display_name": str(j.get("name") or uid),
+        "summary": "钉钉userId:" + uid,
+    }
+    return prof
+
 def _dingtalk_me(access_token: str):
     url = "https://api.dingtalk.com/v1.0/contact/users/me"
     headers = {"x-acs-dingtalk-access-token": access_token}
@@ -507,17 +563,8 @@ def api_dingtalk_h5_auth():
     if not code:
         return jsonify({"ok": False, "msg": "missing authCode"}), 400
     try:
-        tok = _dingtalk_user_access_token(code)
-        access_token = (tok.get("accessToken") or "").strip()
-        if not access_token:
-            return jsonify({
-                "ok": False,
-                "msg": "token response missing accessToken",
-                "hint": "临时码可能不是当前应用签发，或应用类型与接口不匹配，见 DINGTALK-H5.md",
-                "raw_keys": list(tok.keys()) if isinstance(tok, dict) else [],
-            }), 502
-        me = _dingtalk_me(access_token)
-        _dingtalk_put_user_session(tok, me, "h5_jsapi")
+        me = _dingtalk_h5_userinfo_by_code(code)
+        _dingtalk_put_user_session({"corpId": _env_get("DINGTALK_CORP_ID", "")}, me, "h5_jsapi")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500

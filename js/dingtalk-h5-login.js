@@ -99,6 +99,7 @@
   async function init() {
     var h5Btn = document.getElementById("h5LoginBtn");
     var hint = document.getElementById("dingtalkEnvHint");
+    var meHint = document.getElementById("meHint");
 
     var cfg = {};
     try {
@@ -135,8 +136,11 @@
     if (h5Ok) {
       if (hint) {
         hint.textContent = loggedIn
-          ? "已通过钉钉登录。"
+          ? ""
           : "从钉钉工作台打开：正在自动免登（无需扫码）。若失败请刷新页面重试。";
+      }
+      if (loggedIn && meHint && /^未登录/.test((meHint.textContent || "").trim())) {
+        meHint.textContent = "登录状态刷新中…";
       }
       // 只做自动免登，不向用户展示任何登录按钮
       show(h5Btn, false);

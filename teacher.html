@@ -60,23 +60,15 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       background: #fff;
     }
-    .admin-entry-col {
-      flex: 0 0 auto;
-      padding-top: 2px;
-    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="cardx mb-3">
       <div class="d-flex align-items-start flex-wrap gap-3">
-        <!-- 管理员入口：卡片最左侧独立一列 -->
-        <div class="admin-entry-col">
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="goAdminTabBtn" title="管理中心"><i class="bi bi-person-badge"></i> 管理中心</button>
-        </div>
         <div class="flex-grow-1" style="min-width: 200px;">
           <div class="h5 mb-1"><i class="bi bi-chat-square-text"></i> 教师申请</div>
-          <div class="muted mb-0">使用下方标签切换：<strong>快速申请</strong>（一句话解析入队）、<strong>校章申请</strong>（上传 PDF 选点）。左侧为管理员后台入口。</div>
+          <div class="muted mb-0">使用下方标签切换：<strong>快速申请</strong>（一句话解析入队）、<strong>校章申请</strong>（上传 PDF 选点）、<strong>管理中心</strong>。</div>
         </div>
         <div class="d-flex flex-column align-items-end gap-1 ms-md-auto">
           <div class="d-flex gap-2 flex-wrap align-items-center justify-content-end">
@@ -149,7 +141,29 @@
     const API_ME = "/api/me";
 
     const modalEl = document.getElementById("parseModal");
-    const modal = new bootstrap.Modal(modalEl);
+    let modal = null;
+    if (window.bootstrap && window.bootstrap.Modal) {
+      modal = new bootstrap.Modal(modalEl);
+    } else {
+      // 兜底：当 /js/bootstrap.bundle.min.js 未加载成功时，避免整页脚本失效
+      modal = {
+        show: function () {
+          modalEl.style.display = "block";
+          modalEl.classList.add("show");
+          modalEl.removeAttribute("aria-hidden");
+          document.body.classList.add("modal-open");
+        },
+        hide: function () {
+          modalEl.classList.remove("show");
+          modalEl.style.display = "none";
+          modalEl.setAttribute("aria-hidden", "true");
+          document.body.classList.remove("modal-open");
+        }
+      };
+      modalEl.querySelectorAll("[data-bs-dismiss='modal'], .btn-close").forEach(function (btn) {
+        btn.addEventListener("click", function () { modal.hide(); });
+      });
+    }
     let lastParsed = null;
     let sealFrameLoaded = false;
     let adminFrameLoaded = false;
@@ -197,13 +211,6 @@
         });
       });
 
-      const goAdminBtn = document.getElementById("goAdminTabBtn");
-      const adminTabBtn = document.getElementById("tabAdmin");
-      if (goAdminBtn && adminTabBtn) {
-        goAdminBtn.addEventListener("click", function () {
-          adminTabBtn.click();
-        });
-      }
     }
 
     async function loadMe() {

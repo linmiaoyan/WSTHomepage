@@ -80,8 +80,16 @@
     </div>
   </div>
 
-  <script src="/js/pdf.min.js"></script>
-  <script>if (typeof pdfjsLib !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/pdf.worker.min.js';</script>
+  <!-- PDF.js：需与 pdf.worker 同版本。若本地 /js/pdf.min.js 存在且为官方 legacy/build，可改回本地并设置 workerSrc 为 /js/pdf.worker.min.js -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js" crossorigin="anonymous"></script>
+  <script>
+    (function () {
+      if (typeof pdfjsLib !== "undefined") {
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js";
+      }
+    })();
+  </script>
   <script src="/js/dingtalk-h5-login.js"></script>
   <script>
     const SEAL_EMBED = new URLSearchParams(location.search).get('embed') === '1';
@@ -162,6 +170,9 @@
     }
 
     async function renderPdf(file){
+      if (typeof pdfjsLib === "undefined") {
+        throw new Error("pdfjsLib 未定义：PDF 引擎脚本未加载（可检查网络能否访问 cdn.jsdelivr.net，或将官方 pdf.min.js / pdf.worker.min.js 放到 /js/）");
+      }
       const buf = await file.arrayBuffer();
       pdfDoc = await pdfjsLib.getDocument({data: buf}).promise;
       page = await pdfDoc.getPage(1);

@@ -192,7 +192,16 @@ def _map_leave_params_to_cycle_body(p: dict) -> dict:
     week = "3"
     if week_raw is not None:
         ws = str(week_raw).strip()
-        if ws.isdigit():
+        if "," in ws:
+            parts = [x.strip() for x in ws.split(",") if x.strip().isdigit()]
+            if parts:
+                try:
+                    n = int(parts[0])
+                    if 1 <= n <= 7:
+                        week = str(n)
+                except (TypeError, ValueError):
+                    pass
+        elif ws.isdigit():
             try:
                 n = int(ws)
                 if 1 <= n <= 7:
@@ -227,8 +236,13 @@ def _map_leave_params_to_cycle_body(p: dict) -> dict:
     ])
     wd_for_table = None
     try:
-        if week_raw is not None and str(week_raw).strip().isdigit():
-            wd_for_table = int(str(week_raw).strip())
+        wrs = str(week_raw).strip() if week_raw is not None else ""
+        if "," in wrs:
+            first = wrs.split(",")[0].strip()
+            if first.isdigit():
+                wd_for_table = int(first)
+        elif wrs.isdigit():
+            wd_for_table = int(wrs)
     except (TypeError, ValueError):
         wd_for_table = None
     hit = _wzkgz_2025s1_resolve_leave_times(wd_for_table, blob, str(p.get("lesson_hint") or ""))
@@ -454,7 +468,7 @@ def api_request_parse():
         "规则：\n"
         "1) 车牌：识别姓名、车牌号、长期/临时；若“开一年/半年/几个月”等 → plate_type=1 并推算 start_date/end_date（YYYY-MM-DD），否则 plate_type=0。\n"
         "2) 周期请假：students 为学生姓名数组；weekday 为 1-7（周一=1…周日=7），文本含“今天/明天”等请换算成对应星期数字；"
-        "time_start、time_end 为请假日期范围 YYYY-MM-DD（“今天”请用当天日期，不要写汉字）；"
+        "time_start、time_end 为请假日期范围 YYYY-MM-DD（“今天”请用当天日期，不要写汉字）；若写“每天/天天”且未给结束日，time_end 宜设为起算日起约 30 天，并在 notes 提醒教师在确认界面可改日期；"
         "timestart、timeend 必须为当天作息时段的 24小时制 HH:MM（例如晚三=20:50-21:40、下午第三节=15:15-15:55），"
         "严禁把“今天/明天”等日期词填入 timestart/timeend；课节口语放入 lesson_hint（如 晚三、下午第2节）。\n"
         "3) 重置网络密码：识别 userName/userId 以及新密码。\n"

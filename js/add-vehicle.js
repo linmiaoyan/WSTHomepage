@@ -8,6 +8,83 @@ const API_PLATFORM_LOGIN = "/api/platform-login";
 const API_VEHICLE_NLP = "/api/vehicle-nlp";
 const API_SCHOOLISOVER_TOKEN = "/api/schoolisover-token";
 const API_CONTACTS_SEARCH = "/api/contacts-search";
+const VEHICLE_PREFILL_STORAGE_KEY = "ke_vehicle_prefill_v1";
+
+/**
+ * 从审批页写入的 sessionStorage + URL 查询参数合并读取预填数据（URL 优先覆盖同名键）。
+ */
+function readVehiclePrefill() {
+    let fromSession = null;
+    try {
+        const raw = sessionStorage.getItem(VEHICLE_PREFILL_STORAGE_KEY);
+        if (raw) fromSession = JSON.parse(raw);
+    } catch (e) {
+        fromSession = null;
+    }
+    const merged = {};
+    if (fromSession && typeof fromSession === "object") {
+        Object.assign(merged, fromSession);
+    }
+    try {
+        const usp = new URLSearchParams(window.location.search || "");
+        ["plate_no", "plate_type", "remark", "name", "start_date", "end_date", "from_request", "team_uid"].forEach((k) => {
+            const v = usp.get(k);
+            if (v !== null && v !== "") merged[k] = v;
+        });
+    } catch (e) {}
+    const has =
+        (merged.plate_no && String(merged.plate_no).trim()) ||
+        (merged.name && String(merged.name).trim()) ||
+        (merged.remark && String(merged.remark).trim()) ||
+        (merged.from_request && String(merged.from_request).trim()) ||
+        (merged.team_uid && String(merged.team_uid).trim());
+    if (!has) return null;
+    return merged;
+}
+
+function applyVehiclePrefill(pre) {
+    if (!pre || typeof pre !== "object") return;
+    const plateNoEl = document.getElementById("plateNo");
+    const plateTypeEl = document.getElementById("plateType");
+    const remarkEl = document.getElementById("remark");
+    const startDateEl = document.getElementById("startDate");
+    const endDateEl = document.getElementById("endDate");
+    const teamUidEl = document.getElementById("teamUid");
+    const summary = document.getElementById("selectedSummary");
+    const banner = document.getElementById("prefillBanner");
+    const llmInput = document.getElementById("llmVehicleInput");
+
+    const plate = String(pre.plate_no || "").trim();
+    const plateType = String(pre.plate_type != null ? pre.plate_type : "0").trim();
+    const remark = String(pre.remark || "").trim();
+    const startDate = String(pre.start_date || "").trim();
+    const endDate = String(pre.end_date || "").trim();
+    const name = String(pre.name || "").trim();
+    const teamUid = String(pre.team_uid || "").trim();
+    const fromReq = String(pre.from_request || "").trim();
+
+    if (plateNoEl && plate) plateNoEl.value = plate;
+    if (plateTypeEl && (plateType === "0" || plateType === "1")) plateTypeEl.value = plateType;
+    if (remarkEl && remark) remarkEl.value = remark;
+    if (startDateEl && startDate) startDateEl.value = startDate;
+    if (endDateEl && endDate) endDateEl.value = endDate;
+    if (teamUidEl && teamUid) {
+        teamUidEl.value = teamUid;
+        if (summary) summary.innerHTML = "已预填职工 ID：<strong>" + teamUid + "</strong>（请确认或重新选择）";
+    }
+    if (llmInput && (name || plate)) {
+        const bits = [];
+        if (name) bits.push(name);
+        if (plate) bits.push(plate);
+        if (bits.length && !llmInput.value.trim()) llmInput.value = bits.join(" ") + " 车牌";
+    }
+    if (banner) {
+        let msg = "已从审批申请预填车牌信息，请在本页选择职工后提交。";
+        if (fromReq) msg = "已带入审批单 <strong>#" + fromReq + "</strong> 中的车牌等信息；请选择职工（可点「全局搜索」）后提交。";
+        banner.innerHTML = msg;
+        banner.style.display = "block";
+    }
+}
 
 function setStatus(text, type) {
     const el = document.getElementById("statusMsg");
@@ -422,7 +499,7 @@ async function submitForm() {
     }
 }
 
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
     document.getElementById("submitBtn").addEventListener("click", submitForm);
     const platBtn = document.getElementById("platLoginBtn");
     if (platBtn) platBtn.addEventListener("click", platformLogin);
@@ -440,7 +517,27 @@ document.addEventListener("DOMContentLoaded", function () {
     const gbtn = document.getElementById("globalSearchBtn");
     if (gbtn) gbtn.addEventListener("click", globalContactsSearch);
     toggleTempDateVisibility();
-    openDept(1, "根");
+
+    const pre = readVehiclePrefill();
+    if (pre) {
+        applyVehiclePrefill(pre);
+        try {
+            sessionStorage.removeItem(VEHICLE_PREFILL_STORAGE_KEY);
+        } catch (e) {}
+    }
+    toggleTempDateVisibility();
+
+    await openDept(1, "根");
+
+    // 长期车牌：带入姓名后自动全局搜索，便于直接选职工填 team_uid
+    if (pre && String(pre.plate_type || "0") !== "1" && (pre.name || "").trim() && !(pre.team_uid || "").trim()) {
+        const ns = document.getElementById("nameSearch");
+        if (ns) {
+            ns.value = String(pre.name).trim();
+            renderDeptAndUserList();
+        }
+        await globalContactsSearch();
+    }
 
     const fetchTokenBtn = document.getElementById("fetchTokenBtn");
     if (fetchTokenBtn) {

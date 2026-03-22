@@ -214,6 +214,119 @@
       return (el.value || "").trim();
     }
 
+    function toYMDLocal(d) {
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const day = d.getDate();
+      return y + "-" + String(m).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    }
+    function addDaysLocal(d, n) {
+      const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      x.setDate(x.getDate() + n);
+      return x;
+    }
+    function startOfMondayWeek(d) {
+      const day = d.getDay();
+      const mondayDiff = day === 0 ? -6 : 1 - day;
+      return addDaysLocal(d, mondayDiff);
+    }
+    function endOfSundayWeek(d) {
+      const mon = startOfMondayWeek(d);
+      return addDaysLocal(mon, 6);
+    }
+    function normalizeWeekInputToNumbers(w) {
+      if (w == null || w === undefined) return "";
+      let s = String(w).trim();
+      if (!s) return "";
+      s = s.replace(/，/g, ",");
+      if (/^\d+(\s*,\s*\d+)*$/.test(s.replace(/\s/g, ""))) return s.replace(/\s/g, "");
+      const map = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
+      const m = s.match(/周\s*([一二三四五六日天])|星期\s*([一二三四五六日天])/);
+      if (m) {
+        const ch = m[1] || m[2];
+        if (map[ch]) return String(map[ch]);
+      }
+      return s;
+    }
+    function applyLeaveDatePreset() {
+      const el = document.querySelector('input[name="leaveDatePreset"]:checked');
+      const v = el ? el.value : "";
+      const ds = document.getElementById("inp_leave_date_start");
+      const de = document.getElementById("inp_leave_date_end");
+      if (!ds || !de || v === "") return;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let s;
+      let e;
+      if (v === "7") {
+        s = today;
+        e = addDaysLocal(today, 6);
+      } else if (v === "14") {
+        s = today;
+        e = addDaysLocal(today, 13);
+      } else if (v === "30") {
+        s = today;
+        e = addDaysLocal(today, 29);
+      } else if (v === "week_mon_sun") {
+        s = startOfMondayWeek(today);
+        e = endOfSundayWeek(today);
+      } else if (v === "daily_month") {
+        s = today;
+        e = addDaysLocal(today, 29);
+      } else {
+        return;
+      }
+      ds.value = toYMDLocal(s);
+      de.value = toYMDLocal(e);
+    }
+    function syncLeaveWeekFromChecks() {
+      const parts = [];
+      for (let i = 1; i <= 7; i++) {
+        const c = document.getElementById("lw_d" + i);
+        if (c && c.checked) parts.push(String(i));
+      }
+      const inp = document.getElementById("inp_week");
+      if (inp) inp.value = parts.join(",");
+    }
+    function syncLeaveWeekChecksFromInput() {
+      const inp = document.getElementById("inp_week");
+      if (!inp) return;
+      const raw = (inp.value || "").trim();
+      const set = {};
+      raw.split(/[,，]/).forEach(function (x) {
+        const t = x.trim();
+        if (/^\d+$/.test(t) && parseInt(t, 10) >= 1 && parseInt(t, 10) <= 7) set[t] = true;
+      });
+      for (let i = 1; i <= 7; i++) {
+        const c = document.getElementById("lw_d" + i);
+        if (c) c.checked = !!set[String(i)];
+      }
+    }
+    function fillLeaveWeekdayChecksFromParams(weekVal) {
+      const inp = document.getElementById("inp_week");
+      const n = normalizeWeekInputToNumbers(weekVal);
+      if (inp) inp.value = n || "";
+      syncLeaveWeekChecksFromInput();
+    }
+    function markLeaveDatePresetCustom() {
+      const r = document.querySelector('input[name="leaveDatePreset"][value=""]');
+      if (r) r.checked = true;
+    }
+    function bindLeaveCycleFormControls() {
+      const presets = document.querySelectorAll('input[name="leaveDatePreset"]');
+      for (let i = 0; i < presets.length; i++) {
+        presets[i].addEventListener("change", applyLeaveDatePreset);
+      }
+      const ds = document.getElementById("inp_leave_date_start");
+      const de = document.getElementById("inp_leave_date_end");
+      if (ds) ds.addEventListener("input", markLeaveDatePresetCustom);
+      if (de) de.addEventListener("input", markLeaveDatePresetCustom);
+      for (let j = 1; j <= 7; j++) {
+        const c = document.getElementById("lw_d" + j);
+        if (c) c.addEventListener("change", syncLeaveWeekFromChecks);
+      }
+    }
+
     /** 添加车牌：仅「临时」显示日期；切回长期时清空日期避免误提交 */
     function syncAddVehicleDateVisibility() {
       var row = document.getElementById("addVehicleDateRow");
@@ -264,19 +377,52 @@
         html += "<hr class='my-2'/>";
         html += "<div class='row g-2'>";
         html += "  <div class='col-md-6'><label class='form-label small text-muted'>学生</label><input id='inp_students' class='form-control form-control-sm' placeholder='例如：张三；李四' /></div>";
-        html += "  <div class='col-md-3'><label class='form-label small text-muted'>周</label><input id='inp_week' class='form-control form-control-sm' placeholder='例如：1-7或周三' /></div>";
-        html += "  <div class='col-md-3'><label class='form-label small text-muted'>原因</label><input id='inp_reason' class='form-control form-control-sm' placeholder='可空' /></div>";
-        html += "  <div class='col-md-6'><label class='form-label small text-muted'>开始时间（作息时段）</label><input id='inp_timestart' class='form-control form-control-sm' placeholder='例如：下午第1节' /></div>";
-        html += "  <div class='col-md-6'><label class='form-label small text-muted'>结束时间（作息时段）</label><input id='inp_timeend' class='form-control form-control-sm' placeholder='例如：下午第3节' /></div>";
+        html += "  <div class='col-md-6'><label class='form-label small text-muted'>原因</label><input id='inp_reason' class='form-control form-control-sm' placeholder='可空' /></div>";
+        html += "</div>";
+        html += "<div class='mt-2 border rounded p-2 bg-light'>";
+        html += "  <div class='fw-semibold small mb-1'>请假日期范围（可改）</div>";
+        html += "  <div class='row g-2 align-items-end'>";
+        html += "    <div class='col-md-4'><label class='form-label small text-muted'>开始日期</label><input type='date' id='inp_leave_date_start' class='form-control form-control-sm' /></div>";
+        html += "    <div class='col-md-4'><label class='form-label small text-muted'>结束日期</label><input type='date' id='inp_leave_date_end' class='form-control form-control-sm' /></div>";
+        html += "  </div>";
+        html += "  <div class='mt-2 small text-muted'>快捷选项（会覆盖上方起止日期）</div>";
+        html += "  <div class='d-flex flex-wrap gap-2 align-items-center mt-1'>";
+        html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='radio' name='leaveDatePreset' value='' checked /> 自定义</label>";
+        html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='radio' name='leaveDatePreset' value='7' /> 从今天起7天</label>";
+        html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='radio' name='leaveDatePreset' value='14' /> 14天</label>";
+        html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='radio' name='leaveDatePreset' value='30' /> 30天</label>";
+        html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='radio' name='leaveDatePreset' value='week_mon_sun' /> 本自然周（周一至周日）</label>";
+        html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='radio' name='leaveDatePreset' value='daily_month' /> 「每天」约一月</label>";
+        html += "  </div>";
+        html += "</div>";
+        html += "<div class='mt-2 border rounded p-2'>";
+        html += "  <div class='fw-semibold small mb-1'>星期（可多选）</div>";
+        html += "  <div class='d-flex flex-wrap gap-2 mt-1'>";
+        const wdLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+        for (let wi = 0; wi < 7; wi++) {
+          html += "    <label class='form-check form-check-inline m-0 small'><input class='form-check-input' type='checkbox' id='lw_d" + (wi + 1) + "' /> " + wdLabels[wi] + "</label>";
+        }
+        html += "  </div>";
+        html += "  <input type='hidden' id='inp_week' value='' />";
+        html += "  <div class='form-text small text-muted mt-1'>入队参数会保存为 1–7（多选用英文逗号分隔）。自动执行时云平台接口暂按<b>第一项</b>提交；若需每天都报请分次申请或在管理端处理。</div>";
+        html += "</div>";
+        html += "<div class='row g-2 mt-2'>";
+        html += "  <div class='col-md-6'><label class='form-label small text-muted'>开始时刻（作息）</label><input id='inp_timestart' class='form-control form-control-sm' placeholder='如 15:15 或 下午第三节' /></div>";
+        html += "  <div class='col-md-6'><label class='form-label small text-muted'>结束时刻（作息）</label><input id='inp_timeend' class='form-control form-control-sm' placeholder='如 15:55' /></div>";
         html += "</div>";
         wrap.innerHTML = html;
 
-        // 表单回填
-        setHumanValue("inp_students", (params.students || []).join("；"));
-        setHumanValue("inp_week", params.week || "");
+        const stuArr = Array.isArray(params.students) ? params.students : (params.students ? String(params.students).split(/[；,，\s]+/) : []);
+        setHumanValue("inp_students", stuArr.filter(Boolean).join("；"));
         setHumanValue("inp_reason", params.reason || "");
         setHumanValue("inp_timestart", params.timestart || "");
         setHumanValue("inp_timeend", params.timeend || "");
+        setHumanValue("inp_leave_date_start", params.time_start || params.timeStart || "");
+        setHumanValue("inp_leave_date_end", params.time_end || params.timeEnd || "");
+        fillLeaveWeekdayChecksFromParams(params.week != null && params.week !== "" ? params.week : params.weekday);
+        const r0 = document.querySelector('input[name="leaveDatePreset"][value=""]');
+        if (r0) r0.checked = true;
+        bindLeaveCycleFormControls();
         return;
       }
 
@@ -339,13 +485,24 @@
       const params = base.params;
 
       if (type === "leave_cycle") {
+        syncLeaveWeekFromChecks();
         params.students = (getHumanValue("inp_students") || "")
           .split(/[；,，\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
-        // 兼容：有些字段名可能由模型输出为 timestart/timeend/weekday/week
-        params.week = getHumanValue("inp_week") || lastParsed.params.week || "";
+        params.week = getHumanValue("inp_week") || "";
+        const wn = normalizeWeekInputToNumbers(params.week);
+        if (wn && /^\d/.test(wn)) params.week = wn;
+        if (params.week && /^[\d,\s]+$/.test(params.week)) {
+          const first = params.week.split(/[,，]/)[0].trim();
+          if (first && /^\d+$/.test(first)) {
+            const n = parseInt(first, 10);
+            if (n >= 1 && n <= 7) params.weekday = n;
+          }
+        }
         params.reason = getHumanValue("inp_reason") || lastParsed.params.reason || "";
         params.timestart = getHumanValue("inp_timestart") || lastParsed.params.timestart || "";
         params.timeend = getHumanValue("inp_timeend") || lastParsed.params.timeend || "";
+        params.time_start = getHumanValue("inp_leave_date_start") || (lastParsed.params && lastParsed.params.time_start) || "";
+        params.time_end = getHumanValue("inp_leave_date_end") || (lastParsed.params && lastParsed.params.time_end) || "";
         return base;
       }
 

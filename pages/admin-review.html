@@ -70,6 +70,11 @@
                     <div id="detailRequester" class="small mb-3 p-2 border rounded bg-light" style="display:none;"></div>
                     <div class="fw-semibold mb-1"><i class="bi bi-file-text"></i> 申请内容摘要</div>
                     <div id="detailSummary" class="small mb-3 p-2 border rounded"></div>
+                    <div id="addVehiclePrefillWrap" class="alert alert-light border py-2 small mb-3" style="display:none;">
+                        <div class="fw-semibold mb-1"><i class="bi bi-car-front"></i> 去「添加职工车牌」补全职工</div>
+                        <div class="muted mb-2">长期车牌需选择云平台职工 ID。点击下方按钮将<strong>自动带上本单车牌、姓名、备注</strong>并打开添加车牌页（长期时会用姓名自动「全局搜索」便于选人）。</div>
+                        <button type="button" class="btn btn-sm btn-primary" id="btnOpenAddVehiclePrefill"><i class="bi bi-box-arrow-up-right"></i> 打开添加车牌页并带入本单信息</button>
+                    </div>
                     <div id="detailExecutionWrap" style="display:none;">
                         <div class="fw-semibold mb-1"><i class="bi bi-cloud-check"></i> 审批后自动执行结果</div>
                         <div id="detailExecution" class="small mb-3 p-2 border rounded bg-light"></div>
@@ -197,6 +202,73 @@ function renderApplicationSummary(it) {
     return "（无摘要）";
 }
 
+function updateAddVehiclePrefillUI() {
+    const wrap = document.getElementById("addVehiclePrefillWrap");
+    if (!wrap) return;
+    if (!currentDetail || currentDetail.type !== "add_vehicle") {
+        wrap.style.display = "none";
+        return;
+    }
+    wrap.style.display = "";
+}
+
+function gotoAddVehicleFromRequest() {
+    if (!currentDetail || currentDetail.type !== "add_vehicle") return;
+    const p = currentDetail.params || {};
+    const rid = currentDetail.id;
+    let remark = (p.remark || "").trim();
+    const tag = "【审批单#" + rid + "】";
+    if (!remark.includes("审批单#")) {
+        remark = remark ? (remark + " " + tag) : tag;
+    }
+    const payload = {
+        plate_no: String(p.plate_no || "").trim(),
+        plate_type: String(p.plate_type != null ? p.plate_type : "0"),
+        remark: remark,
+        name: String(p.name || "").trim(),
+        start_date: String(p.start_date || "").trim(),
+        end_date: String(p.end_date || "").trim(),
+        from_request: String(rid)
+    };
+    try {
+        sessionStorage.setItem("ke_vehicle_prefill_v1", JSON.stringify(payload));
+    } catch (e) {}
+    const q = new URLSearchParams();
+    q.set("from_request", String(rid));
+    if (payload.plate_no) q.set("plate_no", payload.plate_no);
+    q.set("plate_type", payload.plate_type);
+    if (payload.name) q.set("name", payload.name);
+    if (payload.start_date) q.set("start_date", payload.start_date);
+    if (payload.end_date) q.set("end_date", payload.end_date);
+    const url = "/pages/add-vehicle.html?" + q.toString();
+    if (window.parent && window.parent !== window) {
+        try {
+            const tabs = window.parent.document.querySelectorAll("#tabBar .tab-btn");
+            tabs.forEach(function (btn) {
+                const dp = btn.getAttribute("data-page") || "";
+                if (dp.indexOf("add-vehicle") >= 0) {
+                    btn.classList.add("active");
+                } else {
+                    btn.classList.remove("active");
+                }
+            });
+            const frame = window.parent.document.getElementById("pageFrame");
+            if (frame) {
+                frame.src = url;
+            } else {
+                window.location.href = url;
+            }
+        } catch (e) {
+            window.location.href = url;
+        }
+    } else {
+        window.location.href = url;
+    }
+    try {
+        modal.hide();
+    } catch (e) {}
+}
+
 function renderExecutionBlock(it) {
     const wrap = document.getElementById("detailExecutionWrap");
     const el = document.getElementById("detailExecution");
@@ -266,6 +338,8 @@ async function loadList() {
 async function openDetail(id) {
     document.getElementById("reviewComment").value = "";
     currentDetail = null;
+    const avWrap = document.getElementById("addVehiclePrefillWrap");
+    if (avWrap) avWrap.style.display = "none";
     document.getElementById("detailMeta").textContent = "加载中…";
     document.getElementById("detailJson").textContent = "";
     const sumEl = document.getElementById("detailSummary");
@@ -287,6 +361,7 @@ async function openDetail(id) {
             `编号 ${currentDetail.id} · ${typeLabelZh(currentDetail.type)} · ${statusZh(currentDetail.status)} · 创建 ${fmt(currentDetail.created_at)}`;
         renderRequesterDetail(rq);
         if (sumEl) sumEl.textContent = renderApplicationSummary(currentDetail);
+        updateAddVehiclePrefillUI();
         renderExecutionBlock(currentDetail);
         document.getElementById("detailJson").textContent = JSON.stringify(currentDetail, null, 2);
         modal.show();
@@ -325,6 +400,8 @@ document.getElementById("refreshBtn").addEventListener("click", loadList);
 document.getElementById("statusFilter").addEventListener("change", loadList);
 document.getElementById("approveBtn").addEventListener("click", () => review(true));
 document.getElementById("rejectBtn").addEventListener("click", () => review(false));
+const btnPrefillVehicle = document.getElementById("btnOpenAddVehiclePrefill");
+if (btnPrefillVehicle) btnPrefillVehicle.addEventListener("click", gotoAddVehicleFromRequest);
 
 loadList();
 </script>

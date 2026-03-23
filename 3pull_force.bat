@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 chcp 65001 >nul
 
-set GITHUB_URL=https://github.com/linmiaoyan/KeApprove.git
+set GITHUB_URL=https://github.com/linmiaoyan/WSTHomepage.git
 
 echo ============================================
 echo 强制完整拉取 - 恢复所有文件

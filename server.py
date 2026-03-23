@@ -40,7 +40,20 @@ def _env_get(key: str, default: str = "") -> str:
     return (_read_env_file(_env_here()).get(key) or default).strip()
 
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_web_root_env = _env_get("WEB_ROOT_DIR", "").strip()
+if _web_root_env:
+    WEB_ROOT = _web_root_env if os.path.isabs(_web_root_env) else os.path.join(BASE_DIR, _web_root_env)
+else:
+    default_public = os.path.join(BASE_DIR, "public")
+    if os.path.isdir(default_public) and os.path.isfile(os.path.join(default_public, "index.html")):
+        WEB_ROOT = default_public
+    else:
+        WEB_ROOT = BASE_DIR
+if not os.path.isdir(WEB_ROOT):
+    WEB_ROOT = BASE_DIR
+
+app = Flask(__name__, static_folder=WEB_ROOT, static_url_path='')
 
 # ---- 敏感配置仅从环境变量或 .env 读取（勿写死在代码里）----
 EDU_CFG_PHP = _env_get("EDU_CFG_PHP", "")
@@ -1584,19 +1597,31 @@ def add_cors(response):
 @app.route('/')
 def root():
     """默认入口：教师页面"""
-    return send_from_directory('.', 'teacher.html')
+    return send_from_directory(WEB_ROOT, 'teacher.html')
 
 
 @app.route('/teacher')
 def teacher_page():
     """普通教师申请（独立入口）"""
-    return send_from_directory('.', 'teacher.html')
+    return send_from_directory(WEB_ROOT, 'teacher.html')
 
 
 @app.route('/seal')
 def seal_page():
     """校章申请（独立入口）"""
-    return send_from_directory('.', 'seal.html')
+    return send_from_directory(WEB_ROOT, 'seal.html')
+
+
+@app.route('/portal')
+def portal_page():
+    """门户首页快捷入口"""
+    return send_from_directory(WEB_ROOT, 'home.html')
+
+
+@app.route('/admin')
+def admin_page():
+    """管理中心快捷入口"""
+    return send_from_directory(WEB_ROOT, 'index.html')
 
 def _load_eduyun_cfg():
     """

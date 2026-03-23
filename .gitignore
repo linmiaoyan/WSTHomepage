@@ -12,9 +12,6 @@ env/
 .env.*
 !.env.example
 
-# Node（备用 server/）
-server/node_modules/
-
 # SQLite 本地库（含审批队列与门户数据，勿误传生产库）
 *.db
 *.db-shm

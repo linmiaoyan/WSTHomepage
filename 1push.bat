@@ -51,7 +51,7 @@ if %errorlevel% neq 0 (
 echo [成功] 文件已添加到暂存区
 echo.
 
-:echo [步骤2] 提交更改
+echo [步骤2] 提交更改
 echo.
 
 REM 检查是否有需要提交的更改（包括已暂存的）

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>门户首页 · 校园服务</title>
+    <link rel="stylesheet" href="css/bootstrap.min.css" />
+    <link rel="stylesheet" href="css/common.css" />
+    <link rel="stylesheet" href="css/bootstrap-icons.css" />
+    <style>
+        .hero {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 28px 20px 10px;
+            text-align: center;
+        }
+        .hero h1 { font-size: 1.65rem; margin-bottom: 0.5rem; }
+        .grid {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 10px 20px 40px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+        }
+        .svc-card {
+            background: var(--bg-white);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem 1.35rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+        }
+        .svc-card h2 {
+            font-size: 1.1rem;
+            margin: 0;
+            color: var(--primary-blue);
+            font-weight: 700;
+        }
+        .svc-card p { margin: 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.55; }
+        .svc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+        .svc-actions a {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-decoration: none;
+            border: 1px solid transparent;
+        }
+        .svc-actions a.primary {
+            background: var(--primary-blue);
+            color: #fff;
+        }
+        .svc-actions a.primary:hover { background: var(--primary-blue-dark); color: #fff; }
+        .svc-actions a.outline {
+            border-color: var(--border-color);
+            color: var(--text-primary);
+            background: var(--bg-gray);
+        }
+        .svc-actions a.outline:hover { border-color: var(--primary-blue); color: var(--primary-blue); }
+        .note {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 20px 24px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .one-liner-hint {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 8px 20px 0;
+            text-align: center;
+        }
+        .one-liner-hint .label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.35rem;
+        }
+        .one-liner-hint .example {
+            display: inline-block;
+            margin: 0;
+            padding: 0.5rem 0.9rem;
+            background: var(--bg-gray);
+            border: 1px dashed var(--border-color);
+            border-radius: 8px;
+            font-family: ui-monospace, "Microsoft YaHei", monospace;
+            font-size: 0.95rem;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-navbar">
+        <div class="nav-container">
+            <a class="nav-link active" href="home.html"><i class="bi bi-house-door"></i> 门户首页</a>
+            <a class="nav-link" href="index.html"><i class="bi bi-speedometer2"></i> 管理中心</a>
+        </div>
+    </nav>
+
+    <div class="hero">
+        <h1><i class="bi bi-grid-1x2"></i> 校园服务门户</h1>
+        <p class="text-secondary mb-0">教师填报、问卷填写等面向师生的入口；系统管理与审批请在「管理中心」进行。</p>
+    </div>
+
+    <div class="one-liner-hint">
+        <p class="label mb-1"><i class="bi bi-chat-quote"></i> 一句话报车牌（口语示例，姓名、号牌、时长中间多空格亦可）</p>
+        <p class="example">曾XX    浙C12223   开三个月</p>
+    </div>
+
+    <div class="grid">
+        <div class="svc-card">
+            <h2><i class="bi bi-person-lines-fill"></i> 教师数据填报</h2>
+            <p>填写或更新个人基本信息、任教科目等。提交后由管理员在后台查看与导出。</p>
+            <div class="svc-actions">
+                <a class="primary" href="pages/teacher-data-form.html"><i class="bi bi-pencil-square"></i> 开始填报</a>
+            </div>
+        </div>
+        <div class="svc-card">
+            <h2><i class="bi bi-ui-checks"></i> 问卷 / 投票</h2>
+            <p>通过管理员下发的链接或二维码进入填写页。提交后仅显示感谢页，不会进入管理中心。</p>
+            <div class="svc-actions">
+                <a class="outline" href="pages/quickvote-fill.html"><i class="bi bi-box-arrow-in-right"></i> 打开填写页（需问卷 ID）</a>
+            </div>
+        </div>
+        <div class="svc-card">
+            <h2><i class="bi bi-shield-lock"></i> 管理中心</h2>
+            <p>审批、教师数据后台、问卷制作、车牌与网络密码等管理功能，需通过口令或会话权限。</p>
+            <div class="svc-actions">
+                <a class="primary" href="index.html"><i class="bi bi-speedometer2"></i> 进入管理中心</a>
+            </div>
+        </div>
+    </div>
+
+    <p class="note">
+        说明：若已将「教师数据」「问卷」后端合并进统一服务，请配置 <code>/api/teacher-data/*</code> 与 <code>/api/quickvote/*</code>；未配置时页面可使用浏览器本地演示存储，仅适合单机测试。
+    </p>
+</body>
+</html>

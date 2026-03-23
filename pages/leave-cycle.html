@@ -71,8 +71,8 @@
         <div class="row g-3">
             <div class="col-md-3">
                 <label class="form-label" for="grade">关联年级（grade）</label>
-                <input type="number" class="form-control" id="grade" value="1" min="1" />
-                <div class="hint">须与智慧校园「请假申请」页地址栏一致：<code>…/add/grade/<b>此处数字</b>/…</code>。各校 ID 不同（你校曾出现 17），勿默认 1=高一、2=高二。选错年级会导致「找不到学生」。</div>
+                <input type="text" class="form-control" id="grade" value="" inputmode="numeric" placeholder="留空则自动按高一→高二→高三 试查" autocomplete="off" />
+                <div class="hint">与智慧校园「请假申请」页地址栏一致：<code>…/add/grade/<b>数字</b>/…</code>。<strong>留空</strong>时按 <code>LEAVE_GRADE_GIDS_TRY</code>（默认 1,2,3；你校可改为 17,18,19）依次查找。多人同一单须同一届，否则会提示拆分。</div>
             </div>
             <div class="col-md-12">
                 <label class="form-label">星期（可多选，与平台 groupList 一致）</label>

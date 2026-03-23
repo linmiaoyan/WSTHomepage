@@ -1,32 +1,30 @@
-# Secrets & local env
-.env
-.env.*
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 .Python
-.venv/
 venv/
-*.egg-info/
-.eggs/
-dist/
-build/
+.venv/
+env/
 
-# Local data (may contain PII / uploads)
-uploads/
+# 环境与密钥（勿提交）
+.env
+.env.*
+!.env.example
+
+# Node（备用 server/）
+server/node_modules/
+
+# SQLite 本地库（含审批队列与门户数据，勿误传生产库）
 *.db
-keadmin_queue.db
+*.db-shm
+*.db-wal
 
-# OS / IDE
-Thumbs.db
-Desktop.ini
-.DS_Store
+# 日志
+*.log
+
+# IDE
 .idea/
 .vscode/
 *.swp
-*.swo
-
-# Logs
-*.log
+Thumbs.db

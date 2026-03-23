@@ -381,11 +381,11 @@
       if (type === "leave_cycle") {
         html += "<hr class='my-2'/>";
         html += "<div class='alert alert-warning py-2 small mb-2 mb-md-3'>";
-        html += "  <strong>关联年级（grade）</strong>必须与智慧校园「周期请假申请」里选的年级一致：打开平台请假页，看地址栏 <code>…/add/grade/<b>数字</b>/…</code>，把该数字填到下方。「学生选择器」会按此年级缩小范围；";
-        html += "  若留空或填错，高一可能仍碰巧能对，高二高三常会报 <b>找不到学生</b>。";
+        html += "  <strong>关联年级（grade）</strong>：打开平台请假页，看地址栏 <code>…/add/grade/<b>数字</b>/…</code>，填到下方则只在该年级下查人。";
+        html += "  <strong>留空</strong>则按服务端配置依次试「高一→高二→高三」（<code>LEAVE_GRADE_GIDS_TRY</code>，默认 1,2,3）；多人须同一届，否则请拆分或指定年级。";
         html += "</div>";
         html += "<div class='row g-2'>";
-        html += "  <div class='col-md-4'><label class='form-label small text-muted'>关联年级 ID（grade）</label><input id='inp_leave_grade' class='form-control form-control-sm' inputmode='numeric' placeholder='如 17（以平台 URL 为准）' /></div>";
+        html += "  <div class='col-md-4'><label class='form-label small text-muted'>关联年级 ID（grade）</label><input id='inp_leave_grade' class='form-control form-control-sm' inputmode='numeric' placeholder='留空=自动按高一→高二→高三 试查' /></div>";
         html += "  <div class='col-md-8'><label class='form-label small text-muted'>学生</label><input id='inp_students' class='form-control form-control-sm' placeholder='例如：张三；李四' /></div>";
         html += "  <div class='col-md-12'><label class='form-label small text-muted'>原因</label><input id='inp_reason' class='form-control form-control-sm' placeholder='可空' /></div>";
         html += "</div>";
@@ -423,7 +423,7 @@
         wrap.innerHTML = html;
 
         const stuArr = Array.isArray(params.students) ? params.students : (params.students ? String(params.students).split(/[；,，\s]+/) : []);
-        setHumanValue("inp_leave_grade", params.grade != null && params.grade !== "" ? String(params.grade) : "1");
+        setHumanValue("inp_leave_grade", params.grade != null && String(params.grade).trim() !== "" ? String(params.grade) : "");
         setHumanValue("inp_students", stuArr.filter(Boolean).join("；"));
         setHumanValue("inp_reason", params.reason || "");
         setHumanValue("inp_timestart", params.timestart || "");
@@ -501,7 +501,7 @@
         if (!gLeave && lastParsed.params && lastParsed.params.grade != null && String(lastParsed.params.grade).trim()) {
           gLeave = String(lastParsed.params.grade).trim();
         }
-        params.grade = gLeave || "1";
+        params.grade = gLeave;
         params.students = (getHumanValue("inp_students") || "")
           .split(/[；,，\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
         params.week = getHumanValue("inp_week") || "";

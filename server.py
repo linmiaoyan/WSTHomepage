@@ -98,6 +98,57 @@ def _init_queue_db():
 
 _init_queue_db()
 
+
+def _init_portal_db():
+    """教师数据填报 + 问卷（QuickVote）表，与 keadmin_queue.db 同库，便于单进程备份。"""
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS teacher_records (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              dept TEXT,
+              mobile TEXT,
+              email TEXT,
+              subjects TEXT,
+              remark TEXT,
+              payload_json TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS quickvote_surveys (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              definition_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS quickvote_responses (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              survey_id TEXT NOT NULL,
+              answers_json TEXT NOT NULL,
+              submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+              FOREIGN KEY (survey_id) REFERENCES quickvote_surveys(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_qv_resp_survey ON quickvote_responses(survey_id);
+            CREATE TABLE IF NOT EXISTS migrate_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source_path TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              rows_imported INTEGER NOT NULL DEFAULT 0,
+              note TEXT,
+              imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_init_portal_db()
+
+
 def _now_iso():
     return datetime.utcnow().isoformat() + 'Z'
 
@@ -1850,12 +1901,29 @@ def _leave_fetch_token(sess: requests.Session, grade: str, time_change: str):
     m = re.search(r'value=[\"\']([^\"\']+)[\"\']\\s+name=[\"\']__token__[\"\']', html)
     return m.group(1) if m else ''
 
+def _leave_grade_uncertain(primary: str) -> bool:
+    """年级未指定时：按高一→高二→高三（见 LEAVE_GRADE_GIDS_TRY）依次尝试。"""
+    g = str(primary or "").strip().lower()
+    return g in ("", "auto", "*", "不确定", "unknown", "x")
+
+
 def _leave_grade_gids_try_order(primary: str) -> list:
     """
     学生选择器 POST /base/selector/student 的 gids 必须与平台「关联年级」一致。
-    primary 为表单/队列里填的年级；若找不到，可按 .env LEAVE_STUDENT_SEARCH_GIDS_FALLBACK 依次尝试
-    （英文逗号分隔，如 17,18,19）。注意：重名时优先以 primary 为准，回退仅作补救。
+
+    - **年级未指定**（空、auto、* 等）：只按 .env **LEAVE_GRADE_GIDS_TRY** 遍历（默认 1,2,3 表示高一/高二/高三），
+      各校可改为 17,18,19 等真实 ID。
+    - **已指定年级**：先该 gids，再按 LEAVE_STUDENT_SEARCH_GIDS_FALLBACK 追加尝试（补救）。
     """
+    if _leave_grade_uncertain(primary):
+        seen = set()
+        order = []
+        raw = (_env_get("LEAVE_GRADE_GIDS_TRY", "1,2,3") or "1,2,3").replace("，", ",")
+        for x in [s.strip() for s in raw.split(",")]:
+            if x and x not in seen:
+                seen.add(x)
+                order.append(x)
+        return order or ["1"]
     seen = set()
     order = []
     p = str(primary or "").strip() or "1"
@@ -1954,7 +2022,13 @@ def _leave_cycle_submit_core(data: dict):
             'ok': False,
             'msg': '未配置周期请假：请在 .env 中设置 LEAVE_BASE、LEAVE_USER、LEAVE_PASS',
         }, 503
-    grade = str(data.get('grade') or '1').strip()
+    # grade：未传键时默认 "1"（兼容旧客户端）；传 "" / auto 等表示不确定 → 按 LEAVE_GRADE_GIDS_TRY 遍历高一/高二/高三
+    _gr = data.get("grade")
+    if _gr is None:
+        grade = "1"
+    else:
+        grade = str(_gr).strip()
+
     students_raw = (data.get('students') or '').strip()
     time_start = (data.get('time_start') or '').strip()
     time_end = (data.get('time_end') or '').strip()
@@ -1996,14 +2070,28 @@ def _leave_cycle_submit_core(data: dict):
             return {'ok': False, 'msg': msg or '登录失败', 'raw': j}, 403
 
         resolved = _leave_resolve_user_ids(sess, grade, names)
+        gids_found = [x.get("matched_gid") for x in resolved if x.get("matched_gid")]
+        uniq_g = set(gids_found)
+        if len(uniq_g) > 1:
+            raise ValueError(
+                "多名学生解析到不同年级 ID：" + ", ".join(sorted(uniq_g)) + "。"
+                "自动按高一/高二/高三查找时，同一单内需为同一届；请拆分提交或指定「关联年级」。"
+            )
+        if _leave_grade_uncertain(grade):
+            if not uniq_g:
+                raise ValueError("未能确定年级（请检查姓名，或在表单中指定关联年级 ID）。")
+            eff_grade = next(iter(uniq_g))
+        else:
+            eff_grade = str(grade).strip()
+
         cycle_stuids = ','.join([x['user_id'] for x in resolved])
 
         time_change = 'lesson' if mode == 'lesson' else 'times'
-        token = _leave_fetch_token(sess, grade, time_change)
+        token = _leave_fetch_token(sess, eff_grade, time_change)
 
         slot_n = _leave_cycle_group_list_slot_count()
         form = {
-            'grade': grade,
+            'grade': eff_grade,
             'time_change': time_change,
             'cycle_replace': cycle_replace,
             'cycle_stuids': cycle_stuids,
@@ -2032,7 +2120,7 @@ def _leave_cycle_submit_core(data: dict):
             'accept': 'application/json, text/javascript, */*; q=0.01',
             'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'x-requested-with': 'XMLHttpRequest',
-            'referer': f'{LEAVE_BASE}/studentwork/teacher.studentleavecycle/add/grade/{grade}/time_change/{time_change}.html',
+            'referer': f'{LEAVE_BASE}/studentwork/teacher.studentleavecycle/add/grade/{eff_grade}/time_change/{time_change}.html',
         }
         resp = sess.post(f'{LEAVE_BASE}/studentwork/teacher.studentleavecycle/add.html', data=form, headers=headers, timeout=30)
         return {
@@ -2045,6 +2133,9 @@ def _leave_cycle_submit_core(data: dict):
             # 便于与浏览器 F12 中平台原生表单对照：学生批量条数、星期行数、模式
             'post_summary': {
                 'endpoint': 'studentwork/teacher.studentleavecycle/add.html',
+                'grade_input': grade,
+                'grade_submitted': eff_grade,
+                'grade_auto_scan': bool(_leave_grade_uncertain(grade)),
                 'time_change': time_change,
                 'groupList_slot_count': slot_n,
                 'student_count': len(resolved),
@@ -2407,6 +2498,239 @@ def api_schoolisover_token():
         return jsonify({'ok': True, 'token': t})
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)}), 500
+
+
+# ---------- 教师数据填报 + 问卷（原 Node server/index.js 逻辑合并至此） ----------
+
+
+@app.route("/api/teacher-data/submit", methods=["POST"])
+def api_teacher_data_submit():
+    data = request.get_json(force=True, silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "msg": "缺少姓名"}), 400
+    payload_json = json.dumps(data, ensure_ascii=False)
+    created_at = str(data.get("submitted_at") or "").strip() or _now_iso()
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            """INSERT INTO teacher_records (name, dept, mobile, email, subjects, remark, payload_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                name,
+                (str(data.get("dept") or "").strip() or None),
+                (str(data.get("mobile") or "").strip() or None),
+                (str(data.get("email") or "").strip() or None),
+                (str(data.get("subjects") or "").strip() or None),
+                (str(data.get("remark") or "").strip() or None),
+                payload_json,
+                created_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/teacher-data/list", methods=["GET"])
+def api_teacher_data_list():
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        rows = conn.execute(
+            "SELECT id, name, dept, mobile, email, subjects, remark, created_at, payload_json FROM teacher_records ORDER BY id DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        submitted_at = row["created_at"]
+        try:
+            p = json.loads(row["payload_json"] or "{}")
+            if isinstance(p, dict) and p.get("submitted_at"):
+                submitted_at = p.get("submitted_at")
+        except Exception:
+            pass
+        out.append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "dept": row["dept"],
+                "mobile": row["mobile"],
+                "email": row["email"],
+                "subjects": row["subjects"],
+                "remark": row["remark"],
+                "submitted_at": submitted_at,
+            }
+        )
+    return jsonify({"ok": True, "data": out})
+
+
+def _qv_new_id():
+    return "sv_" + str(int(time.time() * 1000)) + "_" + uuid.uuid4().hex[:6]
+
+
+@app.route("/api/quickvote/surveys", methods=["GET"])
+def api_quickvote_surveys():
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        rows = conn.execute(
+            "SELECT id, title, definition_json FROM quickvote_surveys ORDER BY updated_at DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    data = {}
+    for row in rows:
+        try:
+            data[row["id"]] = json.loads(row["definition_json"] or "{}")
+        except Exception:
+            data[row["id"]] = {"title": row["title"], "questions": []}
+    return jsonify({"ok": True, "data": data})
+
+
+@app.route("/api/quickvote/survey/<string:sid>", methods=["GET", "PUT"])
+def api_quickvote_survey_one(sid: str):
+    sid = (sid or "").strip()
+    if not sid:
+        return jsonify({"ok": False, "msg": "缺少 id"}), 400
+    if request.method == "PUT":
+        if not _admin_api_authorized():
+            return _admin_api_denied_response()
+        b = request.get_json(force=True, silent=True) or {}
+        title = str(b.get("title") or "").strip() or "未命名"
+        questions = b.get("questions") if isinstance(b.get("questions"), list) else []
+        defn = {"title": title, "questions": questions}
+        conn = _db()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute(
+                """INSERT INTO quickvote_surveys (id, title, definition_json, updated_at)
+                   VALUES (?,?,?, datetime('now'))
+                   ON CONFLICT(id) DO UPDATE SET
+                     title = excluded.title,
+                     definition_json = excluded.definition_json,
+                     updated_at = datetime('now')""",
+                (sid, title, json.dumps(defn, ensure_ascii=False)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"ok": True})
+
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        row = conn.execute(
+            "SELECT id, title, definition_json FROM quickvote_surveys WHERE id=?",
+            (sid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return jsonify({"ok": False, "msg": "问卷不存在"}), 404
+    try:
+        defn = json.loads(row["definition_json"] or "{}")
+    except Exception:
+        defn = {"title": row["title"], "questions": []}
+    return jsonify({"ok": True, "data": defn})
+
+
+@app.route("/api/quickvote/survey", methods=["POST"])
+def api_quickvote_survey_create():
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    b = request.get_json(force=True, silent=True) or {}
+    title = str(b.get("title") or "").strip()
+    if not title:
+        return jsonify({"ok": False, "msg": "缺少标题"}), 400
+    sid = str(b.get("id") or "").strip() or _qv_new_id()
+    questions = b.get("questions") if isinstance(b.get("questions"), list) else []
+    defn = {"title": title, "questions": questions}
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            """INSERT INTO quickvote_surveys (id, title, definition_json, updated_at)
+               VALUES (?,?,?, datetime('now'))
+               ON CONFLICT(id) DO UPDATE SET
+                 title = excluded.title,
+                 definition_json = excluded.definition_json,
+                 updated_at = datetime('now')""",
+            (sid, title, json.dumps(defn, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True, "id": sid})
+
+
+@app.route("/api/quickvote/submit", methods=["POST"])
+def api_quickvote_submit():
+    b = request.get_json(force=True, silent=True) or {}
+    survey_id = str(b.get("survey_id") or "").strip()
+    if not survey_id:
+        return jsonify({"ok": False, "msg": "缺少 survey_id"}), 400
+    answers = b.get("answers")
+    if answers is None:
+        answers = {}
+    if not isinstance(answers, dict):
+        answers = {"value": answers}
+    submitted_at = str(b.get("submitted_at") or "").strip() or _now_iso()
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        row = conn.execute("SELECT id FROM quickvote_surveys WHERE id=?", (survey_id,)).fetchone()
+        if not row:
+            conn.execute(
+                """INSERT INTO quickvote_surveys (id, title, definition_json, updated_at)
+                   VALUES (?,?,?, datetime('now'))""",
+                (
+                    survey_id,
+                    "(迁移占位·仅有答卷)",
+                    json.dumps({"title": "(迁移占位)", "questions": [], "_placeholder": True}, ensure_ascii=False),
+                ),
+            )
+        conn.execute(
+            "INSERT INTO quickvote_responses (survey_id, answers_json, submitted_at) VALUES (?,?,?)",
+            (survey_id, json.dumps(answers, ensure_ascii=False), submitted_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/quickvote/responses/<string:sid>", methods=["GET"])
+def api_quickvote_responses(sid: str):
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    sid = (sid or "").strip()
+    if not sid:
+        return jsonify({"ok": False, "msg": "缺少 id"}), 400
+    conn = _db()
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        rows = conn.execute(
+            "SELECT id, answers_json, submitted_at FROM quickvote_responses WHERE survey_id=? ORDER BY id DESC",
+            (sid,),
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        try:
+            ans = json.loads(row["answers_json"] or "{}")
+        except Exception:
+            ans = {}
+        out.append({"id": row["id"], "submitted_at": row["submitted_at"], "answers": ans})
+    return jsonify({"ok": True, "data": out})
 
 
 if __name__ == '__main__':

@@ -195,7 +195,7 @@ function llmFillWeek() {
 
 async function submitLeave() {
   const btn = document.getElementById("submitBtn");
-  const grade = (document.getElementById("grade").value || "1").trim();
+  const grade = String((document.getElementById("grade") || {}).value || "").trim();
   syncLcWeekHiddenFromChecks();
   const week = (document.getElementById("week").value || "3").trim();
   const timestart = (document.getElementById("timestart").value || "").trim();

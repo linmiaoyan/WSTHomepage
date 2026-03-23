@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>教师数据填报</title>
+    <link rel="stylesheet" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="/css/common.css" />
+    <link rel="stylesheet" href="/css/bootstrap-icons.css" />
+    <style>
+        .wrap { max-width: 720px; margin: 18px auto; padding: 0 14px 40px; }
+        .cardx {
+            background: var(--bg-white);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem 1.35rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+        .muted { color: var(--text-secondary); font-size: 13px; }
+        #statusMsg { min-height: 1.25rem; margin-top: 0.75rem; font-size: 0.9rem; white-space: pre-wrap; }
+        #statusMsg.ok { color: var(--success-color); }
+        #statusMsg.err { color: var(--danger-color); }
+    </style>
+</head>
+<body>
+<nav class="top-navbar">
+    <div class="nav-container">
+        <a class="nav-link" href="/home.html"><i class="bi bi-house-door"></i> 门户首页</a>
+        <span class="nav-link active" style="cursor:default;"><i class="bi bi-person-lines-fill"></i> 教师数据填报</span>
+    </div>
+</nav>
+
+<div class="wrap">
+    <div class="cardx mb-3">
+        <h1 class="h5 mb-2"><i class="bi bi-pencil-square"></i> 教师基本信息</h1>
+        <p class="muted mb-0">此页面为师生公开入口，不含管理功能。提交后数据进入后台列表（若已对接接口）。</p>
+    </div>
+
+    <form class="cardx" id="f">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label" for="name">姓名 <span class="text-danger">*</span></label>
+                <input class="form-control" id="name" required autocomplete="name" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="dept">部门 / 学科组</label>
+                <input class="form-control" id="dept" autocomplete="organization" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="mobile">手机</label>
+                <input class="form-control" id="mobile" inputmode="tel" autocomplete="tel" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="email">邮箱</label>
+                <input class="form-control" id="email" type="email" autocomplete="email" />
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="subjects">任教科目（可多行）</label>
+                <textarea class="form-control" id="subjects" rows="3" placeholder="例如：高一信息技术；高二人工智能初步"></textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="remark">备注</label>
+                <textarea class="form-control" id="remark" rows="2"></textarea>
+            </div>
+        </div>
+        <div class="mt-3 d-flex flex-wrap gap-2">
+            <button type="submit" class="btn btn-primary" id="btnSubmit"><i class="bi bi-send"></i> 提交</button>
+            <a class="btn btn-outline-secondary" href="/home.html">返回门户</a>
+        </div>
+        <div id="statusMsg"></div>
+    </form>
+</div>
+
+<script>
+(function () {
+    var LS_KEY = "wst_teacher_data_local_v1";
+
+    function collect() {
+        return {
+            name: (document.getElementById("name").value || "").trim(),
+            dept: (document.getElementById("dept").value || "").trim(),
+            mobile: (document.getElementById("mobile").value || "").trim(),
+            email: (document.getElementById("email").value || "").trim(),
+            subjects: (document.getElementById("subjects").value || "").trim(),
+            remark: (document.getElementById("remark").value || "").trim(),
+            submitted_at: new Date().toISOString()
+        };
+    }
+
+    function setStatus(ok, text) {
+        var el = document.getElementById("statusMsg");
+        el.className = ok === true ? "ok" : ok === false ? "err" : "";
+        el.textContent = text || "";
+    }
+
+    document.getElementById("f").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var payload = collect();
+        if (!payload.name) {
+            setStatus(false, "请填写姓名。");
+            return;
+        }
+        var btn = document.getElementById("btnSubmit");
+        btn.disabled = true;
+        setStatus(null, "提交中…");
+        fetch("/api/teacher-data/submit", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+            .then(function (r) { return r.json().then(function (d) { return { r: r, d: d }; }); })
+            .then(function (_ref) {
+                var r = _ref.r;
+                var d = _ref.d;
+                if (r.ok && d && d.ok) {
+                    setStatus(true, "提交成功，感谢。");
+                    return;
+                }
+                throw new Error((d && (d.msg || d.detail)) || r.status);
+            })
+            .catch(function () {
+                try {
+                    var list = [];
+                    try { list = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch (e) { list = []; }
+                    if (!Array.isArray(list)) list = [];
+                    payload.id = "local_" + Date.now();
+                    list.unshift(payload);
+                    localStorage.setItem(LS_KEY, JSON.stringify(list.slice(0, 200)));
+                    setStatus(true, "后端未配置或不可用：已暂存到本机浏览器（仅演示）。正式环境请部署 /api/teacher-data/submit。");
+                } catch (e2) {
+                    setStatus(false, "提交失败，请稍后重试。");
+                }
+            })
+            .finally(function () {
+                btn.disabled = false;
+            });
+    });
+})();
+</script>
+</body>
+</html>

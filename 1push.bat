@@ -9,6 +9,15 @@ echo.
 
 cd /d "%~dp0"
 
+REM ========== GitHub 远程仓库（改名后请只改这一处）==========
+set "GITHUB_REPO=https://github.com/linmiaoyan/WSTHomepage.git"
+git remote get-url origin >nul 2>&1
+if %errorlevel% equ 0 (
+    git remote set-url origin "%GITHUB_REPO%"
+) else (
+    git remote add origin "%GITHUB_REPO%"
+)
+
 REM 检查Git是否安装
 git --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -80,10 +89,10 @@ if %errorlevel% neq 0 (
     echo 请先在 GitHub 网页上新建一个空仓库，然后在本文件夹打开终端执行下面其中一条（把地址改成你的仓库）：
     echo.
     echo   HTTPS:
-    echo   git remote add origin https://github.com/linmiaoyan/KeApprove.git
+    echo   git remote add origin %GITHUB_REPO%
     echo.
     echo   SSH ^(已配置 SSH 密钥时^):
-    echo   git remote add origin git@github.com:linmiaoyan/KeApprove.git
+    echo   git remote add origin git@github.com:linmiaoyan/WSTHomepage.git
     echo.
     echo 添加成功后，再重新运行本脚本。
     echo.
@@ -98,7 +107,7 @@ if %errorlevel% equ 0 (
     echo [成功] 代码已推送到GitHub
     echo ============================================
     echo.
-    echo 仓库地址：https://github.com/linmiaoyan/KeApprove
+    echo 仓库地址：https://github.com/linmiaoyan/WSTHomepage
     echo.
 ) else (
     echo.

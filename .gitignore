@@ -25,3 +25,11 @@ env/
 .vscode/
 *.swp
 Thumbs.db
+
+# Vendor 子项目中的本地/缓存文件（不影响功能）
+vendor/**/.env
+vendor/**/.env.*
+vendor/**/instance/
+vendor/**/__pycache__/
+vendor/**/.cursor/
+vendor/**/.shared/

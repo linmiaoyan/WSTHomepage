@@ -1,0 +1,1477 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% if is_preview %}
+<div class="alert alert-info mb-3" style="background-color: #bee5eb; border-left: 3px solid #17a2b8;">
+    <strong>预览模式</strong> - 这是问卷的预览界面，不会保存任何提交的数据。
+</div>
+{% endif %}
+<style>
+    /* 强制表格数据单元格内容不换行，以便在小屏幕上启用横向滚动 */
+    .table-responsive table td {
+        white-space: nowrap;
+    }
+    /* 允许表格标题自动换行 */
+    .table-responsive table th {
+        white-space: normal;
+    }
+    /* 确保按钮组内的按钮也保持在一行 */
+    .table-responsive .btn-group {
+        flex-wrap: nowrap;
+    }
+    /* 增加表格列间距 */
+    .table-responsive table td {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+    }
+    /* 增加表格标题列间距 */
+    .table-responsive table th {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+    }
+    /* 增加按钮组内按钮间距 */
+    .btn-group .btn {
+        margin: 0 0.25rem;
+    }
+    /* 隔行交替颜色 - 扁平化 */
+    .table tbody tr:nth-child(odd) td {
+        background-color: #f0f0f0 !important; /* 浅灰色 */
+    }
+    .table tbody tr:nth-child(even) td {
+        background-color: #ffffff !important; /* 白色 */
+    }
+    /* 确保表格列之间有框线 */
+    .table.table-bordered th,
+    .table.table-bordered td {
+        border: 2px solid #abb9c6 !important; /* 强制显示边框 */
+    }
+    /* 添加选项限制提示样式 */
+    .option-limit-info {
+        font-size: 0.9rem;
+        color: #666;
+        margin-top: 0.5rem;
+    }
+    .option-limit-warning {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    /* 添加漏填提示样式 */
+    .missing-field-alert {
+        display: none;
+        color: #dc3545;
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+    }
+    /* 选项限制悬浮提示框 */
+    #option-limit-tooltip {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.85);
+        color: white;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 14px;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        min-width: 200px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: none;
+        transition: opacity 0.3s ease;
+    }
+    #option-limit-tooltip .tooltip-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+        font-size: 15px;
+    }
+    #option-limit-tooltip .option-item {
+        margin-bottom: 6px;
+        padding: 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+    }
+    #option-limit-tooltip .option-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+    }
+    #option-limit-tooltip .option-name {
+        font-weight: 500;
+    }
+    #option-limit-tooltip .option-count {
+        font-weight: 600;
+    }
+    #option-limit-tooltip .option-progress {
+        background: rgba(255, 255, 255, 0.2);
+        height: 4px;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 2px;
+    }
+    #option-limit-tooltip .option-progress-bar {
+        height: 100%;
+        transition: width 0.3s ease;
+    }
+    /* 表格缩放控制 */
+    .table-zoom-wrapper {
+        position: relative;
+        overflow: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: white;
+        margin: 10px 0 5px 0;
+    }
+    .table-zoom-controls {
+        position: sticky;
+        top: 0;
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        z-index: 10;
+        font-size: 14px;
+    }
+    .table-zoom-controls .zoom-label {
+        margin-right: 8px;
+        color: #6b7280;
+        font-weight: 500;
+    }
+    .table-zoom-controls .zoom-display {
+        min-width: 50px;
+        text-align: center;
+        font-weight: 600;
+        color: #2563eb;
+        margin: 0 8px;
+    }
+    .table-zoom-controls .zoom-btn {
+        width: 32px;
+        height: 32px;
+        border: 1px solid #d1d5db;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: 600;
+        color: #374151;
+        margin-right: 4px;
+        transition: all 0.2s;
+    }
+    .table-zoom-controls .zoom-btn:hover {
+        background: #f3f4f6;
+    }
+    .table-zoom-controls .zoom-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    .table-zoom-controls .zoom-reset {
+        margin-left: 8px;
+        padding: 6px 12px;
+        width: auto;
+        height: auto;
+        font-size: 13px;
+    }
+    .table-zoom-container {
+        transform-origin: top left;
+        transition: transform 0.3s ease;
+        overflow: visible;
+    }
+</style>
+<div class="container mt-4">
+    <h2 style="color: #2d3748; font-weight: 600; margin-bottom: 1.5rem;">{{ survey.name }}</h2>
+    
+    {% if survey.introduction %}
+    <div class="card mb-3 survey-intro">
+        <div class="card-body" style="background-color: #edf2f7; border-left: 3px solid #4299e1;">
+            <h4 style="margin-top:0; font-weight: 500; color: #2d3748;">问卷简介</h4>
+            <p class="mb-0" style="color: #4a5568;">{{ survey.introduction }}</p>
+        </div>
+    </div>
+    {% endif %}
+
+
+    
+    <form action="{% if is_preview %}#{% else %}{{ url_for('submit_vote', survey_id=survey.id) }}{% endif %}" method="{% if is_preview %}get{% else %}post{% endif %}" id="voteForm" {% if is_preview %}onsubmit="alert('预览模式下无法提交数据'); return false;"{% endif %}>
+        {% if survey.type == 'single_choice' %}
+            <!-- 单选题问卷 -->
+            <!-- 快速填写按钮（圆形悬浮显示） -->
+            {% if enable_quick_fill %}
+            <button type="button" id="quick-fill-btn-a" class="quick-fill-btn quick-fill-btn-a" title="按住自动选择第一个选项">按住快填A</button>
+            <button type="button" id="quick-fill-btn-b" class="quick-fill-btn quick-fill-btn-b" title="按住自动选择第二个选项">按住快填B</button>
+            {% endif %}
+            
+            {% if survey.option_limits %}
+            <div class="alert alert-info mb-3">
+                <h5 class="alert-heading">选项限制说明</h5>
+                <p class="mb-0">
+                    {% for option, limit in survey.option_limits.items() %}
+                    选项 {{ option }} 最多选择 {{ limit }} 次<br>
+                    {% endfor %}
+                </p>
+            </div>
+            {% endif %}
+            
+            {% for question in questions %}
+            <div class="card mb-3 question-card">
+                <div class="card-body">
+                    <h5 class="card-title" style="font-weight: 600; margin-bottom: 1rem; color: #2c3e50;">{{ question.content }}</h5>
+                    <div class="btn-group" role="group">
+                        {% if question.component_type == 'custom_single_choice' and question.custom_options %}
+                            {% for option_key, option_text in question.custom_options.items() %}
+                            <input type="radio" class="btn-check" name="question_{{ question.id }}" 
+                                   id="q{{ question.id }}_{{ option_key }}" value="{{ option_key }}" required
+                                   {% if saved_choices.get('question_' + question.id|string) == option_key %}checked{% endif %}>
+                            <label class="btn btn-outline-primary" for="q{{ question.id }}_{{ option_key }}">{{ option_text }}</label>
+                            {% endfor %}
+                        {% else %}
+                            {% for option in 'ABCDE'[:question.option_count] %}
+                            <input type="radio" class="btn-check" name="question_{{ question.id }}" 
+                                   id="q{{ question.id }}_{{ option }}" value="{{ option }}" required
+                                   {% if saved_choices.get('question_' + question.id|string) == option %}checked{% endif %}>
+                            <label class="btn btn-outline-primary" for="q{{ question.id }}_{{ option }}">{{ option }}</label>
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                    <div class="missing-field-alert" id="missing_{{ question.id }}">
+                        请选择此问题的答案
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            
+            <!-- 选项限制悬浮提示框 -->
+            {% if survey.option_limits %}
+            <div id="option-limit-tooltip"></div>
+            {% endif %}
+            
+        {% elif survey.type == 'table' %}
+            <!-- 表格问卷 -->
+            <!-- 快速打分按钮（圆形悬浮显示） -->
+            {% if enable_quick_fill %}
+            <button type="button" id="quick-score-btn-a" class="quick-fill-btn quick-fill-btn-a" title="按住自动选择第一个选项">按住快填A</button>
+            <button type="button" id="quick-score-btn-b" class="quick-fill-btn quick-fill-btn-b" title="按住自动选择第二个选项">按住快填B</button>
+            {% endif %}
+            
+            {% if survey.option_limits %}
+            <div class="alert alert-info mb-3">
+                <h5 class="alert-heading">选项限制说明</h5>
+                <p class="mb-0">
+                    {% for option in survey.option_limits.keys() %}
+                    选项 {{ option }} 最多选择 {{ survey.option_limits[option] }} 次<br>
+                    {% endfor %}
+                </p>
+            </div>
+            {% endif %}
+            
+            <!-- 自定义单选组件（在表格外单独显示） -->
+            {% set custom_questions = questions|selectattr('component_type', 'equalto', 'custom_single_choice')|list %}
+            {% if custom_questions %}
+                {% for question in custom_questions %}
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title" style="font-weight: 600; margin-bottom: 1rem; color: #2c3e50;">{{ question.content }}</h5>
+                        <div class="btn-group" role="group">
+                            {% for option_key, option_text in question.custom_options.items() %}
+                            <input type="radio" class="btn-check" name="question_{{ question.id }}" 
+                                   id="custom_q{{ question.id }}_{{ option_key }}" value="{{ option_key }}" required
+                                   {% if saved_choices.get('question_' + question.id|string) == option_key %}checked{% endif %}>
+                            <label class="btn btn-outline-primary" for="custom_q{{ question.id }}_{{ option_key }}">{{ option_text }}</label>
+                            {% endfor %}
+                        </div>
+                        <div class="missing-field-alert" id="missing_{{ question.id }}">
+                            请选择此问题的答案
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% endif %}
+            
+            <!-- 标准表格（只显示标准问题） -->
+            {% set standard_questions = questions|rejectattr('component_type', 'equalto', 'custom_single_choice')|list %}
+            {% if standard_questions %}
+            <!-- 分页控制（仅移动端显示） -->
+            <div id="pagination-container" style="display: none;">
+                <div class="pagination" id="pagination-controls"></div>
+            </div>
+            
+            <div class="table-responsive" id="table-responsive-wrapper">
+                <div class="table-zoom-wrapper">
+                    <div class="table-zoom-controls">
+                        <span class="zoom-label">缩放:</span>
+                        <button class="zoom-btn zoom-out" type="button">−</button>
+                        <span class="zoom-display">100%</span>
+                        <button class="zoom-btn zoom-in" type="button">+</button>
+                        <button class="zoom-btn zoom-reset" type="button">重置</button>
+                    </div>
+                    <div class="table-zoom-container">
+                        <table class="table table-bordered" id="vote-table">
+                            <thead>
+                                <tr>
+                                    <th> </th>
+                                    {% for question in standard_questions %}
+                                    <th>{{ question.content }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody id="vote-table-body">
+                                {% for respondent in respondents %}
+                                <tr data-respondent-id="{{ respondent.id }}" class="respondent-row">
+                                    <td>{{ respondent.name }}</td>
+                                    {% for question in standard_questions %}
+                                    <td>
+                                        <div class="btn-group" role="group">
+                                            {% for option in 'ABCDE'[:table_option_count] %}
+                                            <input type="radio" class="btn-check" 
+                                                   name="vote_{{ question.id }}_{{ respondent.id }}" 
+                                                   id="vote_{{ question.id }}_{{ respondent.id }}_{{ option }}" 
+                                                   value="{{ option }}" required
+                                                   {% if saved_choices.get('vote_' + question.id|string + '_' + respondent.id|string) == option %}checked{% endif %}>
+                                            <label class="btn btn-outline-primary" 
+                                                   for="vote_{{ question.id }}_{{ respondent.id }}_{{ option }}">{{ option }}</label>
+                                            {% endfor %}
+                                        </div>
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- 分页信息 -->
+            <div id="pagination-info" style="display: none; text-align: center; margin: 1rem 0; color: #666;">
+                <span id="page-info-text"></span>
+            </div>
+            
+            <!-- 选项限制悬浮提示框 -->
+            {% if survey.option_limits %}
+            <div id="option-limit-tooltip"></div>
+            {% endif %}
+        {% endif %}
+        
+        {% if subjective_question_prompt %}
+        <div class="card mt-3 mb-3">
+            <div class="card-body">
+                <h5 class="card-title">{{ subjective_question_prompt }}</h5>
+                <div class="mb-3">
+                    <textarea class="form-control" id="subjective_answer" name="subjective_answer" rows="5" 
+                              placeholder="请在此处输入您的意见和建议...">{{ saved_choices.get('subjective_answer', '') }}</textarea>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="mt-3">
+            <button type="submit" class="btn btn-primary">提交</button>
+        </div>
+    </form>
+</div>
+
+{% if survey.type == 'single_choice' and survey.option_limits %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const optionLimits = {{ survey.option_limits|tojson|safe }};
+    const optionList = Object.keys(optionLimits);
+    const tooltip = document.getElementById('option-limit-tooltip');
+
+    function updateOptionCounts() {
+        const counts = {};
+        optionList.forEach(opt => counts[opt] = 0);
+        document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
+            const val = radio.value;
+            if (counts[val] !== undefined) counts[val]++;
+        });
+        
+        // 更新悬浮提示框
+        if (tooltip) {
+            let html = '<div class="tooltip-title">选项限制状态</div>';
+            let hasActiveLimits = false;
+
+            optionList.sort().forEach(option => {
+                const limit = optionLimits[option];
+                const count = counts[option] || 0;
+                
+                if (limit && limit > 0) {
+                    hasActiveLimits = true;
+                    const percentage = (count / limit) * 100;
+                    const isWarning = percentage >= 80;
+                    const isDanger = percentage >= 100;
+                    
+                    const color = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
+                    
+                    html += `
+                        <div class="option-item">
+                            <div class="option-header">
+                                <span class="option-name">选项 ${option}:</span>
+                                <span class="option-count" style="color: ${color};">${count} / ${limit}</span>
+                            </div>
+                            <div class="option-progress">
+                                <div class="option-progress-bar" style="background: ${color}; width: ${Math.min(percentage, 100)}%;"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            if (hasActiveLimits) {
+                tooltip.innerHTML = html;
+                tooltip.style.display = 'block';
+            } else {
+                tooltip.style.display = 'none';
+            }
+        }
+    }
+
+    // 绑定所有radio的change事件
+    document.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', updateOptionCounts);
+    });
+
+    // 页面加载时初始化一次（包括恢复保存的选择后）
+    updateOptionCounts();
+    
+    // 如果有保存的选择，触发change事件以确保计数正确更新
+    document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
+        const changeEvent = new Event('change', { bubbles: true });
+        radio.dispatchEvent(changeEvent);
+    });
+});
+</script>
+{% endif %}
+
+{% if survey.type == 'table' %}
+<script>
+// 表格缩放功能（全局函数，可被多次调用但只初始化一次）
+function initTableZoom() {
+    try {
+        const zoomContainer = document.querySelector('.table-zoom-container');
+        const zoomDisplay = document.querySelector('.zoom-display');
+        const zoomOutBtn = document.querySelector('.zoom-out');
+        const zoomInBtn = document.querySelector('.zoom-in');
+        const zoomResetBtn = document.querySelector('.zoom-reset');
+
+        // 调试信息
+        if (!zoomContainer) {
+            console.warn('表格缩放: 未找到 .table-zoom-container 元素');
+            return false;
+        }
+        if (!zoomDisplay) {
+            console.warn('表格缩放: 未找到 .zoom-display 元素');
+            return false;
+        }
+        if (!zoomOutBtn || !zoomInBtn || !zoomResetBtn) {
+            console.warn('表格缩放: 未找到缩放按钮元素');
+            return false;
+        }
+
+        // 如果已经初始化过，跳过
+        if (zoomContainer.hasAttribute('data-zoom-initialized')) {
+            return true;
+        }
+        zoomContainer.setAttribute('data-zoom-initialized', 'true');
+
+        let zoomLevel = 100;
+        const minZoom = 10;
+        const maxZoom = 200;
+        const step = 10;
+
+        function updateZoom(level) {
+            try {
+                zoomLevel = Math.max(minZoom, Math.min(maxZoom, level));
+                zoomContainer.style.transform = `scale(${zoomLevel / 100})`;
+                zoomContainer.style.webkitTransform = `scale(${zoomLevel / 100})`; // Safari兼容
+                zoomContainer.style.msTransform = `scale(${zoomLevel / 100})`; // IE兼容
+                zoomDisplay.textContent = `${zoomLevel}%`;
+
+                zoomOutBtn.disabled = zoomLevel <= minZoom;
+                zoomInBtn.disabled = zoomLevel >= maxZoom;
+                zoomOutBtn.style.opacity = zoomLevel <= minZoom ? '0.5' : '1';
+                zoomInBtn.style.opacity = zoomLevel >= maxZoom ? '0.5' : '1';
+                zoomOutBtn.style.cursor = zoomLevel <= minZoom ? 'not-allowed' : 'pointer';
+                zoomInBtn.style.cursor = zoomLevel >= maxZoom ? 'not-allowed' : 'pointer';
+            } catch (e) {
+                console.error('表格缩放: updateZoom 错误', e);
+            }
+        }
+
+        // 使用事件委托，确保事件绑定成功
+        zoomOutBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            updateZoom(zoomLevel - step);
+        };
+        zoomInBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            updateZoom(zoomLevel + step);
+        };
+        zoomResetBtn.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            updateZoom(100);
+        };
+
+        // 初始化
+        updateZoom(100);
+        console.log('表格缩放功能已初始化');
+        return true;
+    } catch (e) {
+        console.error('表格缩放: 初始化错误', e);
+        return false;
+    }
+}
+
+// 多种方式尝试初始化，确保在服务器上也能工作
+(function tryInitZoom() {
+    // 方式1: 如果DOM已经加载完成，立即执行
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(initTableZoom, 100);
+    }
+    
+    // 方式2: DOMContentLoaded事件
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(initTableZoom, 100);
+        });
+    }
+    
+    // 方式3: window.onload事件（作为备用）
+    window.addEventListener('load', function() {
+        if (!document.querySelector('.table-zoom-container')?.hasAttribute('data-zoom-initialized')) {
+            setTimeout(initTableZoom, 200);
+        }
+    });
+    
+    // 方式4: 使用MutationObserver监听DOM变化（如果表格是动态加载的）
+    const observer = new MutationObserver(function(mutations) {
+        const container = document.querySelector('.table-zoom-container');
+        if (container && !container.hasAttribute('data-zoom-initialized')) {
+            setTimeout(initTableZoom, 100);
+        }
+    });
+    
+    // 观察body的变化
+    if (document.body) {
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        // 5秒后停止观察（避免无限观察）
+        setTimeout(function() {
+            observer.disconnect();
+        }, 5000);
+    }
+})();
+</script>
+
+{% if survey.option_limits %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const optionLimits = {{ survey.option_limits|tojson|safe }};
+    const optionList = Object.keys(optionLimits);
+    const tooltip = document.getElementById('option-limit-tooltip');
+
+    function updateTableOptionCounts() {
+        const counts = {};
+        optionList.forEach(opt => counts[opt] = 0);
+        // 统计表格中所有已选择的选项
+        document.querySelectorAll('#vote-table input[type="radio"]:checked').forEach(radio => {
+            const val = radio.value;
+            if (counts[val] !== undefined) counts[val]++;
+        });
+        
+        // 更新悬浮提示框
+        if (tooltip) {
+            let html = '<div class="tooltip-title">选项限制状态</div>';
+            let hasActiveLimits = false;
+
+            optionList.sort().forEach(option => {
+                const limit = optionLimits[option];
+                const count = counts[option] || 0;
+                
+                if (limit && limit > 0) {
+                    hasActiveLimits = true;
+                    const percentage = (count / limit) * 100;
+                    const isWarning = percentage >= 80;
+                    const isDanger = percentage >= 100;
+                    
+                    const color = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
+                    const status = isDanger ? '已满' : isWarning ? '接近' : '正常';
+                    
+                    html += `
+                        <div class="option-item">
+                            <div class="option-header">
+                                <span class="option-name">选项 ${option}:</span>
+                                <span class="option-count" style="color: ${color};">${count} / ${limit}</span>
+                            </div>
+                            <div class="option-progress">
+                                <div class="option-progress-bar" style="background: ${color}; width: ${Math.min(percentage, 100)}%;"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            if (hasActiveLimits) {
+                tooltip.innerHTML = html;
+                tooltip.style.display = 'block';
+            } else {
+                tooltip.style.display = 'none';
+            }
+        }
+    }
+
+    // 绑定所有radio的change事件
+    document.querySelectorAll('#vote-table input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', updateTableOptionCounts);
+    });
+
+    // 页面加载时初始化一次（包括恢复保存的选择后）
+    updateTableOptionCounts();
+    
+    // 如果有保存的选择，触发change事件以确保计数正确更新
+    document.querySelectorAll('#vote-table input[type="radio"]:checked').forEach(radio => {
+        const changeEvent = new Event('change', { bubbles: true });
+        radio.dispatchEvent(changeEvent);
+    });
+
+    // 初始化表格缩放功能
+    setTimeout(initTableZoom, 100);
+});
+</script>
+{% else %}
+<script>
+// 如果没有选项限制，也需要初始化缩放功能
+(function initZoomWithoutLimits() {
+    function tryInit() {
+        if (initTableZoom()) {
+            console.log('表格缩放功能已初始化（无选项限制）');
+        } else {
+            // 如果初始化失败，延迟重试
+            setTimeout(tryInit, 200);
+        }
+    }
+    
+    // 多种方式尝试初始化
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(tryInit, 100);
+    } else {
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(tryInit, 100);
+        });
+    }
+    
+    window.addEventListener('load', function() {
+        if (!document.querySelector('.table-zoom-container')?.hasAttribute('data-zoom-initialized')) {
+            setTimeout(tryInit, 200);
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endif %}
+
+{% if survey.type == 'single_choice' and enable_quick_fill %}
+<script>
+// 单选题问卷快速填写功能
+document.addEventListener('DOMContentLoaded', function() {
+    const quickFillBtnA = document.getElementById('quick-fill-btn-a');
+    const quickFillBtnB = document.getElementById('quick-fill-btn-b');
+    
+    if (quickFillBtnA || quickFillBtnB) {
+        let isQuickFilling = false;
+        let currentQuestionIndex = 0;
+        let fillTimeout = null;
+        let currentOptionIndex = 0; // 0表示选择第一个选项，1表示选择第二个选项
+        let currentBtn = null; // 当前被按下的按钮
+        
+        // 获取所有问题卡片（确保获取到所有包含radio的卡片）
+        const questionCards = Array.from(document.querySelectorAll('.card.mb-3')).filter(card => {
+            const hasRadio = card.querySelector('input[type="radio"]') !== null;
+            return hasRadio;
+        });
+        
+        console.log('找到问题卡片数量:', questionCards.length);
+        
+        function autoSelectOption() {
+            if (!isQuickFilling) {
+                if (fillTimeout) {
+                    clearTimeout(fillTimeout);
+                    fillTimeout = null;
+                }
+                return;
+            }
+            
+            if (currentQuestionIndex >= questionCards.length) {
+                // 所有问题都填写完了
+                stopQuickFilling();
+                return;
+            }
+            
+            const currentCard = questionCards[currentQuestionIndex];
+            if (currentCard) {
+                // 获取当前问题的所有radio选项
+                const radios = currentCard.querySelectorAll('input[type="radio"]');
+                
+                // 选择指定索引的选项（currentOptionIndex: 0表示第一个，1表示第二个）
+                if (radios.length > currentOptionIndex) {
+                    const targetRadio = radios[currentOptionIndex];
+                    if (targetRadio && !targetRadio.checked) {
+                        // 先设置checked属性
+                        targetRadio.checked = true;
+                        
+                        // 找到对应的label并触发点击（这样会更新样式）
+                        const labelId = targetRadio.id;
+                        const label = document.querySelector(`label[for="${labelId}"]`);
+                        if (label) {
+                            // 触发label的点击事件来更新样式
+                            label.click();
+                        }
+                        
+                        // 触发change事件，更新选项计数等
+                        const changeEvent = new Event('change', { bubbles: true });
+                        targetRadio.dispatchEvent(changeEvent);
+                        
+                        // 触发input事件
+                        const inputEvent = new Event('input', { bubbles: true });
+                        targetRadio.dispatchEvent(inputEvent);
+                        
+                        console.log('已选择问题', currentQuestionIndex + 1, '的选项', targetRadio.value);
+                        
+                        // 滚动到当前问题（延迟一点让选择生效）
+                        setTimeout(() => {
+                            currentCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 50);
+                    }
+                }
+                
+                // 移动到下一个问题
+                currentQuestionIndex++;
+            } else {
+                currentQuestionIndex++;
+            }
+            
+            // 继续下一个选择（稍快一些，但不是秒选）
+            if (isQuickFilling) {
+                fillTimeout = setTimeout(autoSelectOption, 150);
+            }
+        }
+        
+        // 查找第一个未填的问题索引
+        function findFirstUnfilledQuestion() {
+            for (let i = 0; i < questionCards.length; i++) {
+                const card = questionCards[i];
+                const radios = card.querySelectorAll('input[type="radio"]');
+                let hasChecked = false;
+                for (let radio of radios) {
+                    if (radio.checked) {
+                        hasChecked = true;
+                        break;
+                    }
+                }
+                if (!hasChecked) {
+                    return i;
+                }
+            }
+            return -1; // 所有问题都已填写
+        }
+        
+        function startQuickFilling(optionIndex, btn) {
+            if (isQuickFilling) return;
+            
+            console.log('开始快速填写，选项索引:', optionIndex);
+            
+            // 查找第一个未填的问题，从未填的开始
+            const firstUnfilledIndex = findFirstUnfilledQuestion();
+            if (firstUnfilledIndex === -1) {
+                // 所有问题都已填写
+                alert('所有问题都已填写完成！');
+                return;
+            }
+            
+            isQuickFilling = true;
+            currentOptionIndex = optionIndex;
+            currentBtn = btn;
+            btn.classList.add('active');
+            btn.textContent = '填写中';
+            
+            // 从未填的问题开始
+            currentQuestionIndex = firstUnfilledIndex;
+            
+            console.log('从未填的问题开始:', currentQuestionIndex + 1);
+            
+            // 开始自动选择
+            autoSelectOption();
+        }
+        
+        function stopQuickFilling() {
+            console.log('停止快速填写');
+            isQuickFilling = false;
+            if (currentBtn) {
+                currentBtn.classList.remove('active');
+                if (currentBtn === quickFillBtnA) {
+                    currentBtn.textContent = '按住快填A';
+                } else if (currentBtn === quickFillBtnB) {
+                    currentBtn.textContent = '按住快填B';
+                }
+                currentBtn = null;
+            }
+            
+            if (fillTimeout) {
+                clearTimeout(fillTimeout);
+                fillTimeout = null;
+            }
+        }
+        
+        // 为按钮A添加事件监听
+        if (quickFillBtnA) {
+            // 防止文本选择
+            quickFillBtnA.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            quickFillBtnA.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            // 触摸事件处理
+            quickFillBtnA.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickFilling(0, quickFillBtnA);
+            }, { passive: false });
+            
+            quickFillBtnA.addEventListener('touchend', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            }, { passive: false });
+            
+            quickFillBtnA.addEventListener('touchcancel', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            }, { passive: false });
+            
+            // 鼠标事件处理
+            quickFillBtnA.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickFilling(0, quickFillBtnA);
+            });
+            
+            quickFillBtnA.addEventListener('mouseup', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            });
+            
+            quickFillBtnA.addEventListener('mouseleave', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            });
+            
+            quickFillBtnA.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+        }
+        
+        // 为按钮B添加事件监听
+        if (quickFillBtnB) {
+            // 防止文本选择
+            quickFillBtnB.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            quickFillBtnB.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            // 触摸事件处理
+            quickFillBtnB.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickFilling(1, quickFillBtnB);
+            }, { passive: false });
+            
+            quickFillBtnB.addEventListener('touchend', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            }, { passive: false });
+            
+            quickFillBtnB.addEventListener('touchcancel', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            }, { passive: false });
+            
+            // 鼠标事件处理
+            quickFillBtnB.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickFilling(1, quickFillBtnB);
+            });
+            
+            quickFillBtnB.addEventListener('mouseup', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            });
+            
+            quickFillBtnB.addEventListener('mouseleave', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickFilling();
+            });
+            
+            quickFillBtnB.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+        }
+        
+        // 防止页面滚动时误触发
+        document.addEventListener('touchmove', function(e) {
+            if (isQuickFilling && (e.target === quickFillBtnA || e.target === quickFillBtnB)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+    }
+});
+</script>
+{% endif %}
+
+{% if survey.type == 'table' and enable_quick_fill %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const ITEMS_PER_PAGE = 20;
+    let currentPage = 1;
+    let isQuickScoring = false;
+    let quickScoreTimeout = null;
+    let currentOptionIndex = 0; // 0表示选择第一个选项，1表示选择第二个选项
+    let currentBtn = null; // 当前被按下的按钮
+    
+    // 检测是否为移动设备
+    function isMobile() {
+        return window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    }
+    
+    // 获取所有行
+    const allRows = Array.from(document.querySelectorAll('.respondent-row'));
+    const totalRows = allRows.length;
+    const totalPages = Math.ceil(totalRows / ITEMS_PER_PAGE);
+    
+    // 获取所有问题（列）
+    const allQuestions = Array.from(document.querySelectorAll('#vote-table thead th')).slice(1); // 跳过第一列（人名列）
+    const totalQuestions = allQuestions.length;
+    
+    // showPage 函数定义（在移动设备上时使用）
+    function showPage(page) {
+        const start = (page - 1) * ITEMS_PER_PAGE;
+        const end = start + ITEMS_PER_PAGE;
+        
+        allRows.forEach((row, index) => {
+            if (index >= start && index < end) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        
+        // 更新分页信息
+        const paginationInfo = document.getElementById('pagination-info');
+        if (paginationInfo && paginationInfo.style.display !== 'none') {
+            const infoText = document.getElementById('page-info-text');
+            if (infoText) {
+                infoText.textContent = `第 ${page} 页，共 ${totalPages} 页（每页 ${ITEMS_PER_PAGE} 人）`;
+            }
+        }
+        
+        // 更新分页按钮
+        if (totalPages > 1) {
+            updatePaginationButtons(page);
+        }
+    }
+    
+    // 更新分页按钮
+    function updatePaginationButtons(page) {
+        const controls = document.getElementById('pagination-controls');
+        if (!controls) return;
+        
+        controls.innerHTML = '';
+        
+        // 上一页按钮
+        const prevBtn = document.createElement('button');
+        prevBtn.type = 'button';
+        prevBtn.className = 'pagination-btn';
+        prevBtn.textContent = '上一页';
+        prevBtn.disabled = page === 1;
+        prevBtn.onclick = () => {
+            if (page > 1) {
+                currentPage = page - 1;
+                showPage(currentPage);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                // 触发分页变化事件
+                window.dispatchEvent(new Event('pagination-change'));
+            }
+        };
+        controls.appendChild(prevBtn);
+        
+        // 页码显示
+        const pageInfo = document.createElement('span');
+        pageInfo.textContent = ` ${page} / ${totalPages} `;
+        pageInfo.style.padding = '0 1rem';
+        controls.appendChild(pageInfo);
+        
+        // 下一页按钮
+        const nextBtn = document.createElement('button');
+        nextBtn.type = 'button';
+        nextBtn.className = 'pagination-btn';
+        nextBtn.textContent = '下一页';
+        nextBtn.disabled = page === totalPages;
+        nextBtn.onclick = () => {
+            if (page < totalPages) {
+                currentPage = page + 1;
+                showPage(currentPage);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                // 触发分页变化事件
+                window.dispatchEvent(new Event('pagination-change'));
+            }
+        };
+        controls.appendChild(nextBtn);
+    }
+    
+    // 快速打分功能变量
+    let currentRowIndex = 0;
+    let currentQuestionIndex = 0;
+    
+    // 快速打分按钮在所有设备上都显示（悬浮）
+    const quickScoreBtnA = document.getElementById('quick-score-btn-a');
+    const quickScoreBtnB = document.getElementById('quick-score-btn-b');
+    
+    // 如果是移动设备，显示分页功能
+    if (isMobile()) {
+        const paginationContainer = document.getElementById('pagination-container');
+        const paginationInfo = document.getElementById('pagination-info');
+        
+        // 只有多页时才显示分页功能
+        if (totalPages > 1) {
+            if (paginationContainer) paginationContainer.style.display = 'block';
+            if (paginationInfo) paginationInfo.style.display = 'block';
+            // 初始化第一页
+            showPage(1);
+        } else {
+            // 如果只有一页，显示所有行
+            allRows.forEach(row => {
+                row.style.display = '';
+            });
+        }
+    }
+    
+    // 快速打分功能（所有设备都可用）
+    if (quickScoreBtnA || quickScoreBtnB) {
+        
+        // 简化的自动选择函数：按表格自然顺序（从左到右，从上到下）填写
+        function autoSelectOption() {
+            if (!isQuickScoring) {
+                if (quickScoreTimeout) {
+                    clearTimeout(quickScoreTimeout);
+                    quickScoreTimeout = null;
+                }
+                return;
+            }
+            
+            // 检查是否超出范围
+            if (currentRowIndex >= allRows.length) {
+                stopQuickScoring();
+                return;
+            }
+            
+            // 获取当前行
+            const currentRow = allRows[currentRowIndex];
+            if (!currentRow) {
+                stopQuickScoring();
+                return;
+            }
+            
+            // 如果是移动设备且使用分页，确保当前行可见
+            if (isMobile() && totalPages > 1) {
+                const rowIndex = allRows.indexOf(currentRow);
+                const targetPage = Math.floor(rowIndex / ITEMS_PER_PAGE) + 1;
+                if (targetPage !== currentPage) {
+                    currentPage = targetPage;
+                    showPage(currentPage);
+                    // 等待页面切换完成
+                    setTimeout(() => {
+                        if (isQuickScoring) {
+                            quickScoreTimeout = setTimeout(autoSelectOption, 100);
+                        }
+                    }, 100);
+                    return;
+                }
+            }
+            
+            // 获取当前行的所有选项组（跳过第一列的人名列）
+            const cells = currentRow.querySelectorAll('td');
+            if (cells.length < 2 || currentQuestionIndex >= cells.length - 1) {
+                // 当前行的所有问题都完成了，移动到下一行
+                currentRowIndex++;
+                currentQuestionIndex = 0;
+                
+                // 继续下一个选择
+                if (isQuickScoring) {
+                    quickScoreTimeout = setTimeout(autoSelectOption, 100);
+                }
+                return;
+            }
+            
+            // 获取当前单元格（跳过第一列，所以+1）
+            const currentCell = cells[currentQuestionIndex + 1];
+            if (!currentCell) {
+                currentRowIndex++;
+                currentQuestionIndex = 0;
+                if (isQuickScoring) {
+                    quickScoreTimeout = setTimeout(autoSelectOption, 100);
+                }
+                return;
+            }
+            
+            // 获取当前单元格的选项组
+            const btnGroup = currentCell.querySelector('.btn-group');
+            if (!btnGroup) {
+                currentQuestionIndex++;
+                if (isQuickScoring) {
+                    quickScoreTimeout = setTimeout(autoSelectOption, 100);
+                }
+                return;
+            }
+            
+            // 检查是否已填写
+            const radios = btnGroup.querySelectorAll('input[type="radio"]');
+            let isFilled = false;
+            for (let radio of radios) {
+                if (radio.checked) {
+                    isFilled = true;
+                    break;
+                }
+            }
+            
+            if (isFilled) {
+                // 已填写，跳过到下一个
+                currentQuestionIndex++;
+                if (isQuickScoring) {
+                    quickScoreTimeout = setTimeout(autoSelectOption, 50);
+                }
+                return;
+            }
+            
+            // 选择指定索引的选项（currentOptionIndex: 0表示第一个，1表示第二个）
+            if (radios.length > currentOptionIndex) {
+                const targetRadio = radios[currentOptionIndex];
+                if (targetRadio) {
+                    // 设置checked属性
+                    targetRadio.checked = true;
+                    
+                    // 找到对应的label并触发点击（更新样式）
+                    const labelId = targetRadio.id;
+                    const label = btnGroup.querySelector(`label[for="${labelId}"]`);
+                    if (label) {
+                        label.click();
+                    }
+                    
+                    // 触发change事件
+                    const changeEvent = new Event('change', { bubbles: true });
+                    targetRadio.dispatchEvent(changeEvent);
+                    
+                    // 触发input事件
+                    const inputEvent = new Event('input', { bubbles: true });
+                    targetRadio.dispatchEvent(inputEvent);
+                    
+                    console.log('已选择第', currentRowIndex + 1, '行第', currentQuestionIndex + 1, '题的选项', targetRadio.value);
+                    
+                    // 滚动到当前单元格（可选，让用户看到进度）
+                    setTimeout(() => {
+                        currentCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 50);
+                }
+            }
+            
+            // 移动到下一个问题
+            currentQuestionIndex++;
+            
+            // 继续下一个选择
+            if (isQuickScoring) {
+                quickScoreTimeout = setTimeout(autoSelectOption, 150);
+            }
+        }
+        
+        // 查找第一个未填的单元格（从表格开始遍历）
+        function findFirstUnfilledCell() {
+            // 遍历所有行
+            for (let rowIdx = 0; rowIdx < allRows.length; rowIdx++) {
+                const row = allRows[rowIdx];
+                const cells = row.querySelectorAll('td');
+                
+                // 遍历所有问题列（跳过第一列人名）
+                for (let qIdx = 0; qIdx < cells.length - 1; qIdx++) {
+                    const cell = cells[qIdx + 1];
+                    const btnGroup = cell.querySelector('.btn-group');
+                    if (!btnGroup) continue;
+                    
+                    const radios = btnGroup.querySelectorAll('input[type="radio"]');
+                    let hasChecked = false;
+                    
+                    for (let radio of radios) {
+                        if (radio.checked) {
+                            hasChecked = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!hasChecked) {
+                        // 找到第一个未填的单元格
+                        return { rowIndex: rowIdx, questionIndex: qIdx };
+                    }
+                }
+            }
+            
+            return null; // 所有单元格都已填写
+        }
+        
+        function startQuickScoring(optionIndex, btn) {
+            if (isQuickScoring) return;
+            
+            console.log('开始快速填写，选项索引:', optionIndex);
+            
+            // 查找第一个未填的单元格，从未填的开始
+            const firstUnfilled = findFirstUnfilledCell();
+            if (!firstUnfilled) {
+                // 所有单元格都已填写
+                alert('所有选项都已填写完成！');
+                return;
+            }
+            
+            isQuickScoring = true;
+            currentOptionIndex = optionIndex;
+            currentBtn = btn;
+            btn.classList.add('active');
+            btn.textContent = '填写中';
+            
+            // 从未填的单元格开始
+            currentRowIndex = firstUnfilled.rowIndex;
+            currentQuestionIndex = firstUnfilled.questionIndex;
+            
+            console.log('从未填的单元格开始: 第', currentRowIndex + 1, '行, 第', currentQuestionIndex + 1, '题');
+            
+            // 如果是移动设备且使用分页，切换到包含当前行的页面
+            if (isMobile() && totalPages > 1) {
+                const targetPage = Math.floor(currentRowIndex / ITEMS_PER_PAGE) + 1;
+                if (targetPage !== currentPage) {
+                    currentPage = targetPage;
+                    showPage(currentPage);
+                }
+            }
+            
+            // 开始自动选择
+            setTimeout(() => {
+                if (isQuickScoring) {
+                    autoSelectOption();
+                }
+            }, 200);
+        }
+        
+        function stopQuickScoring() {
+            isQuickScoring = false;
+            if (currentBtn) {
+                currentBtn.classList.remove('active');
+                if (currentBtn === quickScoreBtnA) {
+                    currentBtn.textContent = '按住快填A';
+                } else if (currentBtn === quickScoreBtnB) {
+                    currentBtn.textContent = '按住快填B';
+                }
+                currentBtn = null;
+            }
+            
+            if (quickScoreTimeout) {
+                clearTimeout(quickScoreTimeout);
+                quickScoreTimeout = null;
+            }
+        }
+        
+        // 为按钮A添加事件监听
+        if (quickScoreBtnA) {
+            // 防止文本选择
+            quickScoreBtnA.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            quickScoreBtnA.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            // 触摸事件处理
+            quickScoreBtnA.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickScoring(0, quickScoreBtnA);
+            }, { passive: false });
+            
+            quickScoreBtnA.addEventListener('touchend', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            }, { passive: false });
+            
+            quickScoreBtnA.addEventListener('touchcancel', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            }, { passive: false });
+            
+            // 鼠标事件处理（用于测试）
+            quickScoreBtnA.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickScoring(0, quickScoreBtnA);
+            });
+            
+            quickScoreBtnA.addEventListener('mouseup', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            });
+            
+            quickScoreBtnA.addEventListener('mouseleave', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            });
+            
+            quickScoreBtnA.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+        }
+        
+        // 为按钮B添加事件监听
+        if (quickScoreBtnB) {
+            // 防止文本选择
+            quickScoreBtnB.addEventListener('selectstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            quickScoreBtnB.addEventListener('dragstart', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            // 触摸事件处理
+            quickScoreBtnB.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickScoring(1, quickScoreBtnB);
+            }, { passive: false });
+            
+            quickScoreBtnB.addEventListener('touchend', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            }, { passive: false });
+            
+            quickScoreBtnB.addEventListener('touchcancel', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            }, { passive: false });
+            
+            // 鼠标事件处理（用于测试）
+            quickScoreBtnB.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                startQuickScoring(1, quickScoreBtnB);
+            });
+            
+            quickScoreBtnB.addEventListener('mouseup', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            });
+            
+            quickScoreBtnB.addEventListener('mouseleave', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                stopQuickScoring();
+            });
+            
+            quickScoreBtnB.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+        }
+        
+        // 防止页面滚动时误触发
+        document.addEventListener('touchmove', function(e) {
+            if (isQuickScoring && (e.target === quickScoreBtnA || e.target === quickScoreBtnB)) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        // 监听分页变化，查找新页面的第一个未填单元格
+        window.addEventListener('pagination-change', function() {
+            if (isQuickScoring && typeof findFirstUnfilledCell === 'function') {
+                const firstUnfilled = findFirstUnfilledCell();
+                if (firstUnfilled) {
+                    currentRowIndex = firstUnfilled.rowIndex;
+                    currentQuestionIndex = firstUnfilled.questionIndex;
+                    console.log('分页变化，从未填单元格继续: 第', currentRowIndex + 1, '行, 第', currentQuestionIndex + 1, '题');
+                } else {
+                    // 新页面没有未填的单元格，停止快速填写
+                    stopQuickScoring();
+                }
+            }
+        });
+    }
+});
+</script>
+{% endif %}
+{% endblock %}

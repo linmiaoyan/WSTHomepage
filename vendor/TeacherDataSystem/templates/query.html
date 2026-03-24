@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>查询我的填表结果</title>
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            border: none;
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            padding: 20px;
+        }
+        .form-label {
+            font-weight: 600;
+            color: #333;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #0d7a70 0%, #2dd169 100%);
+            color: white;
+        }
+        .task-item {
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-completed {
+            background: #28a745;
+            color: white;
+        }
+        .status-processing {
+            background: #ffc107;
+            color: #333;
+        }
+        .status-failed {
+            background: #dc3545;
+            color: white;
+        }
+        .signature-canvas {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: crosshair;
+            background: white;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        .signature-container {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="card-header text-center">
+                <h3><i class="bi bi-file-earmark-pdf"></i> 查询我的填表结果</h3>
+            </div>
+            <div class="card-body">
+                <!-- 登录提示 -->
+                <div id="login-prompt" class="alert alert-info mb-3" style="display: none;">
+                    <i class="bi bi-info-circle"></i> 您已登录，可以 <a href="/teacher/dashboard" class="alert-link">进入个人中心</a> 查看所有任务
+                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkLoginStatus()">刷新状态</button>
+                </div>
+                
+                <!-- 身份验证表单 -->
+                <div id="auth-section">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span>或使用身份证号和手机号查询：</span>
+                        <a href="/teacher/login" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-box-arrow-in-right"></i> 登录
+                        </a>
+                    </div>
+                    <form id="auth-form">
+                        <div class="mb-3">
+                            <label for="id_number" class="form-label">身份证号 *</label>
+                            <input type="text" class="form-control" id="id_number" name="id_number" 
+                                   placeholder="请输入身份证号" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="phone" class="form-label">手机号 *</label>
+                            <input type="text" class="form-control" id="phone" name="phone" 
+                                   placeholder="请输入手机号" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-search"></i> 查询
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- 任务列表 -->
+                <div id="tasks-section" style="display: none;">
+                    <h5 class="mb-3">我的填表任务</h5>
+                    <div id="tasks-list">
+                        <div class="text-center text-muted">加载中...</div>
+                    </div>
+                    <div class="mt-3">
+                        <button class="btn btn-secondary" onclick="resetQuery()">
+                            <i class="bi bi-arrow-left"></i> 重新查询
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = '/api';
+        
+        // 检查登录状态
+        function checkLoginStatus() {
+            const token = localStorage.getItem('teacher_token');
+            const loginPrompt = document.getElementById('login-prompt');
+            if (token) {
+                loginPrompt.style.display = 'block';
+            } else {
+                loginPrompt.style.display = 'none';
+            }
+        }
+        
+        // 页面加载时检查登录状态
+        window.addEventListener('DOMContentLoaded', () => {
+            checkLoginStatus();
+        });
+        
+        document.getElementById('auth-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const idNumber = document.getElementById('id_number').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            
+            if (!idNumber || !phone) {
+                alert('请填写完整信息');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/tasks/query`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        id_number: idNumber,
+                        phone: phone
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.teacher_id) {
+                        displayTasks(data.tasks || [], data.teacher_id);
+                    } else {
+                        alert('未找到您的信息，请确认身份证号和手机号是否正确');
+                    }
+                } else {
+                    const error = await response.json();
+                    alert('查询失败：' + (error.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('查询错误:', error);
+                alert('查询失败：' + error.message);
+            }
+        });
+        
+        function displayTasks(tasks, teacherId) {
+            const tasksList = document.getElementById('tasks-list');
+            const authSection = document.getElementById('auth-section');
+            const tasksSection = document.getElementById('tasks-section');
+            
+            if (tasks.length === 0) {
+                tasksList.innerHTML = '<div class="text-center text-muted">暂无相关任务</div>';
+            } else {
+                tasksList.innerHTML = tasks.map(task => {
+                    const statusClass = task.status === 'completed' ? 'status-completed' : 
+                                       task.status === 'processing' ? 'status-processing' : 
+                                       'status-failed';
+                    const statusText = task.status === 'completed' ? '已完成' : 
+                                      task.status === 'processing' ? '处理中' : 
+                                      '失败';
+                    
+                    return `
+                        <div class="task-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div style="flex: 1;">
+                                    <h6 class="mb-2">${escapeHtml(task.name)}</h6>
+                                    <p class="text-muted mb-1">
+                                        <small>创建时间：${new Date(task.created_at).toLocaleString('zh-CN')}</small>
+                                    </p>
+                                    ${task.completed_at ? `
+                                        <p class="text-muted mb-1">
+                                            <small>完成时间：${new Date(task.completed_at).toLocaleString('zh-CN')}</small>
+                                        </p>
+                                    ` : ''}
+                                    <span class="status-badge ${statusClass}">${statusText}</span>
+                                </div>
+                                <div class="ms-3">
+                                    ${task.status === 'completed' ? `
+                                        <button class="btn btn-sm btn-primary" onclick="downloadMyFile(${task.id}, ${teacherId})">
+                                            <i class="bi bi-download"></i> 下载我的文件
+                                        </button>
+                                    ` : `
+                                        <button class="btn btn-sm btn-info" onclick="viewTaskDetail(${task.id}, ${teacherId})">
+                                            <i class="bi bi-info-circle"></i> 查看详情
+                                        </button>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            authSection.style.display = 'none';
+            tasksSection.style.display = 'block';
+        }
+        
+        async function downloadMyFile(taskId, teacherId) {
+            try {
+                const response = await fetch(`${API_BASE}/tasks/${taskId}/download-teacher/${teacherId}`);
+                if (response.ok) {
+                    // 获取文件名
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    let filename = `task_${taskId}_teacher_${teacherId}.pdf`;
+                    if (contentDisposition) {
+                        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+                        if (filenameMatch) {
+                            filename = filenameMatch[1];
+                        }
+                    }
+                    
+                    // 下载文件
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    const error = await response.json();
+                    alert('下载失败：' + (error.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('下载错误:', error);
+                alert('下载失败：' + error.message);
+            }
+        }
+        
+        function resetQuery() {
+            document.getElementById('auth-section').style.display = 'block';
+            document.getElementById('tasks-section').style.display = 'none';
+            document.getElementById('auth-form').reset();
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 查看任务详情
+        async function viewTaskDetail(taskId, teacherId) {
+            try {
+                const [taskRes, detailRes] = await Promise.all([
+                    fetch(`${API_BASE}/tasks/${taskId}`),
+                    fetch(`${API_BASE}/tasks/${taskId}/detail`)
+                ]);
+                
+                if (!taskRes.ok || !detailRes.ok) {
+                    throw new Error('加载任务详情失败');
+                }
+                
+                const task = await taskRes.json();
+                const detail = await detailRes.json();
+                const extraPlaceholders = detail.extra_placeholders || [];
+                const hasExtraPlaceholders = detail.has_extra_placeholders || false;
+                const hasQuestionnaire = detail.has_questionnaire || false;
+                const questionnaireId = detail.questionnaire_id;
+                
+                // 检查是否有问卷需要填写
+                let questionnaire = null;
+                let myResponse = null;
+                let teacherData = null; // 教师数据，用于检查是否已有数据
+                
+                // 获取教师数据
+                try {
+                    const teacherRes = await fetch(`${API_BASE}/teachers/${teacherId}`);
+                    if (teacherRes.ok) {
+                        teacherData = await teacherRes.json();
+                    }
+                } catch (e) {
+                    console.error('加载教师数据失败:', e);
+                }
+                
+                if (hasQuestionnaire && questionnaireId) {
+                    try {
+                        const qRes = await fetch(`${API_BASE}/questionnaires/${questionnaireId}`);
+                        if (qRes.ok) {
+                            questionnaire = await qRes.json();
+                        }
+                        
+                        // 获取我的回答
+                        const responsesRes = await fetch(`${API_BASE}/questionnaires/${questionnaireId}/responses`);
+                        if (responsesRes.ok) {
+                            const responses = await responsesRes.json();
+                            myResponse = responses.find(r => r.teacher_id === teacherId);
+                        }
+                    } catch (e) {
+                        console.error('加载问卷信息失败:', e);
+                    }
+                }
+                
+                // 检查是否所有字段数据都已存在（用于"已核对"功能）
+                let allFieldsExist = false;
+                if (questionnaire && teacherData && questionnaire.fields) {
+                    const extraData = teacherData.extra_data || {};
+                    // 检查所有字段是否都在extra_data中存在且不为空
+                    allFieldsExist = questionnaire.fields.every(field => {
+                        const value = extraData[field.name];
+                        return value !== undefined && value !== null && value !== '';
+                    });
+                }
+                
+                // 创建详情模态框
+                let modalContent = `
+                    <div class="mb-3">
+                        <p><strong>任务名称：</strong>${escapeHtml(task.name)}</p>
+                        <p><strong>状态：</strong>${task.status === 'completed' ? '<span class="badge bg-success">已完成</span>' : 
+                                                      task.status === 'processing' ? '<span class="badge bg-warning">处理中</span>' : 
+                                                      '<span class="badge bg-secondary">待处理</span>'}</p>
+                        <p><strong>创建时间：</strong>${new Date(task.created_at).toLocaleString('zh-CN')}</p>
+                    </div>
+                `;
+                
+                // 如果有额外占位符，显示填写表单
+                if (hasExtraPlaceholders && questionnaire) {
+                    // 显示已渲染的PDF预览（如果任务已完成）
+                    let pdfPreviewHtml = '';
+                    if (task.status === 'completed') {
+                        pdfPreviewHtml = `
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <strong>已渲染的PDF预览</strong>
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted">您的PDF文件已生成，可以下载查看。</p>
+                                    <button class="btn btn-primary btn-sm" onclick="downloadMyFile(${taskId}, ${teacherId})">
+                                        <i class="bi bi-download"></i> 下载我的PDF文件
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // 如果任务未完成，尝试显示预览（使用模板和当前教师数据）
+                        pdfPreviewHtml = `
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <strong>PDF预览（基于当前数据）</strong>
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted">PDF将在所有信息填写完成后生成。</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    modalContent += pdfPreviewHtml;
+                    modalContent += `
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <strong>需要填写的信息</strong>
+                            </div>
+                            <div class="card-body">
+                                ${myResponse ? `
+                                    <div class="alert alert-success">
+                                        <strong>您已填写完成</strong>
+                                        <p class="mb-0 mt-2">填写时间：${new Date(myResponse.submitted_at).toLocaleString('zh-CN')}</p>
+                                    </div>
+                                    <div class="mt-3">
+                                        <h6>您的填写内容：</h6>
+                                        <table class="table table-sm">
+                                            <tbody>
+                                                ${questionnaire.fields.map(field => {
+                                                    const value = myResponse.answers[field.name] || '-';
+                                                    const isSignature = field.type === 'signature' ||
+                                                                       (field.name && (field.name.includes('签名') || field.name.includes('signature'))) ||
+                                                                       (field.label && (field.label.includes('签名') || field.label.includes('signature')));
+                                                    const isImage = value && value.startsWith('data:image');
+                                                    
+                                                    return `
+                                                    <tr>
+                                                        <th style="width: 30%;">${escapeHtml(field.label || field.name)}</th>
+                                                        <td>
+                                                            ${isImage ? `
+                                                                <img src="${value}" alt="签名" style="max-width: 300px; border: 1px solid #ddd; border-radius: 4px;">
+                                                            ` : escapeHtml(String(value))}
+                                                        </td>
+                                                    </tr>
+                                                `;
+                                                }).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ` : allFieldsExist && !myResponse ? `
+                                    <div class="alert alert-info">
+                                        <strong><span class="badge bg-info me-2">已核对</span>所有数据已存在</strong>
+                                        <p class="mb-2 mt-2">系统检测到您所需填写的所有信息都已存在于数据库中，无需再次填写。</p>
+                                        <p class="mb-0">请确认信息无误后点击"确认"按钮。</p>
+                                    </div>
+                                    <div class="mt-3">
+                                        <h6>当前数据：</h6>
+                                        <table class="table table-sm">
+                                            <tbody>
+                                                ${questionnaire.fields.map(field => {
+                                                    const value = teacherData.extra_data[field.name] || '-';
+                                                    const isSignature = field.type === 'signature' ||
+                                                                       (field.name && (field.name.includes('签名') || field.name.includes('signature'))) ||
+                                                                       (field.label && (field.label.includes('签名') || field.label.includes('signature')));
+                                                    const isImage = value && value.startsWith('data:image');
+                                                    
+                                                    return `
+                                                    <tr>
+                                                        <th style="width: 30%;">${escapeHtml(field.label || field.name)}</th>
+                                                        <td>
+                                                            ${isImage ? `
+                                                                <img src="${value}" alt="签名" style="max-width: 300px; border: 1px solid #ddd; border-radius: 4px;">
+                                                            ` : escapeHtml(String(value))}
+                                                        </td>
+                                                    </tr>
+                                                `;
+                                                }).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="d-grid mt-3">
+                                        <button type="button" class="btn btn-success" onclick="confirmExistingData(${taskId}, ${teacherId}, ${questionnaireId})">
+                                            <i class="bi bi-check-circle"></i> 确认
+                                        </button>
+                                    </div>
+                                ` : `
+                                    <form id="extra-placeholder-form">
+                                        ${questionnaire.fields.map(field => {
+                                            // 优先使用字段的type属性，如果没有则检查字段名
+                                            const isSignature = field.type === 'signature' ||
+                                                               (field.name && (field.name.includes('签名') || field.name.includes('signature'))) || 
+                                                               (field.label && (field.label.includes('签名') || field.label.includes('signature')));
+                                            const existingValue = myResponse ? (myResponse.answers[field.name] || '') : '';
+                                            
+                                            return `
+                                            <div class="mb-3">
+                                                <label class="form-label">${escapeHtml(field.label || field.name)}${field.required ? ' <span class="text-danger">*</span>' : ''}</label>
+                                                ${isSignature ? `
+                                                    <div class="signature-container">
+                                                        <canvas id="signature-canvas-${field.name}" class="signature-canvas" width="400" height="150" style="border: 1px solid #ddd; border-radius: 4px; cursor: crosshair; background: white;"></canvas>
+                                                        <div class="mt-2">
+                                                            <button type="button" class="btn btn-sm btn-secondary" onclick="clearSignature('${field.name}')">清除</button>
+                                                            <button type="button" class="btn btn-sm btn-primary" onclick="saveSignatureAndSubmit('${field.name}', ${taskId}, ${teacherId}, ${questionnaireId})">保存并提交</button>
+                                                        </div>
+                                                        <input type="hidden" name="${field.name}" id="signature-input-${field.name}" ${field.required ? 'required' : ''} value="${existingValue}">
+                                                        ${existingValue ? `
+                                                            <div class="mt-2">
+                                                                <img src="${existingValue}" alt="已保存的签名" style="max-width: 400px; border: 1px solid #ddd; border-radius: 4px;">
+                                                            </div>
+                                                        ` : ''}
+                                                    </div>
+                                                ` : field.type === 'text' || !field.type ? `
+                                                    <input type="text" class="form-control" name="${field.name}" 
+                                                           ${field.required ? 'required' : ''} 
+                                                           value="${existingValue}">
+                                                ` : field.type === 'number' ? `
+                                                    <input type="number" class="form-control" name="${field.name}" 
+                                                           ${field.required ? 'required' : ''} 
+                                                           value="${existingValue}">
+                                                ` : field.type === 'select' && field.options ? `
+                                                    <select class="form-select" name="${field.name}" ${field.required ? 'required' : ''}>
+                                                        <option value="">请选择...</option>
+                                                        ${field.options.map(opt => `
+                                                            <option value="${escapeHtml(opt)}" ${existingValue === opt ? 'selected' : ''}>${escapeHtml(opt)}</option>
+                                                        `).join('')}
+                                                    </select>
+                                                ` : `
+                                                    <textarea class="form-control" name="${field.name}" rows="3" ${field.required ? 'required' : ''}>${existingValue}</textarea>
+                                                `}
+                                            </div>
+                                        `;
+                                        }).join('')}
+                                    </form>
+                                `}
+                            </div>
+                        </div>
+                    `;
+                } else if (hasExtraPlaceholders && !hasQuestionnaire) {
+                    modalContent += `
+                        <div class="alert alert-info">
+                            <p>此任务包含额外占位符，等待管理员发起问卷。</p>
+                        </div>
+                    `;
+                }
+                
+                // 如果已完成，显示下载按钮
+                if (task.status === 'completed') {
+                    modalContent += `
+                        <div class="mt-3">
+                            <button class="btn btn-primary" onclick="downloadMyFile(${taskId}, ${teacherId})">
+                                <i class="bi bi-download"></i> 下载我的文件
+                            </button>
+                        </div>
+                    `;
+                }
+                
+                // 创建并显示模态框
+                const modal = document.createElement('div');
+                modal.className = 'modal fade show';
+                modal.style.display = 'block';
+                modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                modal.innerHTML = `
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">任务详情</h5>
+                                <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
+                            </div>
+                            <div class="modal-body">
+                                ${modalContent}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                
+                // 绑定表单提交事件
+                const form = document.getElementById('extra-placeholder-form');
+                if (form) {
+                    form.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        await submitExtraPlaceholderForm(taskId, teacherId, questionnaireId, form);
+                    });
+                    
+                    // 初始化所有签名画板
+                    questionnaire.fields.forEach(field => {
+                        // 优先使用字段的type属性，如果没有则检查字段名
+                        const isSignature = field.type === 'signature' ||
+                                           (field.name && (field.name.includes('签名') || field.name.includes('signature'))) || 
+                                           (field.label && (field.label.includes('签名') || field.label.includes('signature')));
+                        if (isSignature) {
+                            // 延迟初始化，确保DOM已渲染
+                            setTimeout(() => {
+                                console.log(`[签名画板] 准备初始化字段: ${field.name}`);
+                                const canvasId = `signature-canvas-${field.name}`;
+                                const canvas = document.getElementById(canvasId);
+                                console.log(`[签名画板] 查找canvas元素: ${canvasId}`, canvas);
+                                
+                                if (canvas) {
+                                    initSignatureCanvas(field.name);
+                                    
+                                    // 如果有已保存的签名，显示在画板上
+                                    const existingValue = myResponse ? (myResponse.answers[field.name] || '') : '';
+                                    if (existingValue && existingValue.startsWith('data:image')) {
+                                        const img = new Image();
+                                        img.onload = function() {
+                                            const canvas = signatureCanvases[field.name];
+                                            const ctx = signatureContexts[field.name];
+                                            if (canvas && ctx) {
+                                                ctx.drawImage(img, 0, 0);
+                                                console.log(`[签名画板] 已加载保存的签名图像`);
+                                            }
+                                        };
+                                        img.src = existingValue;
+                                    }
+                                } else {
+                                    console.error(`[签名画板] 延迟初始化时仍未找到canvas: ${canvasId}`);
+                                    // 再试一次，延迟更长时间
+                                    setTimeout(() => {
+                                        const canvas2 = document.getElementById(canvasId);
+                                        if (canvas2) {
+                                            console.log(`[签名画板] 第二次尝试成功找到canvas`);
+                                            initSignatureCanvas(field.name);
+                                        } else {
+                                            console.error(`[签名画板] 第二次尝试仍未找到canvas: ${canvasId}`);
+                                        }
+                                    }, 500);
+                                }
+                            }, 100);
+                        }
+                    });
+                }
+                
+            } catch (error) {
+                console.error('加载任务详情失败:', error);
+                alert('加载失败：' + error.message);
+            }
+        }
+        
+        // 确认已有数据（用于"已核对"功能）
+        async function confirmExistingData(taskId, teacherId, questionnaireId) {
+            if (!confirm('确认信息无误并提交吗？')) {
+                return;
+            }
+            
+            try {
+                // 获取教师数据
+                const teacherRes = await fetch(`${API_BASE}/teachers/${teacherId}`);
+                if (!teacherRes.ok) throw new Error('加载教师数据失败');
+                const teacherData = await teacherRes.json();
+                
+                // 获取问卷信息
+                const qRes = await fetch(`${API_BASE}/questionnaires/${questionnaireId}`);
+                if (!qRes.ok) throw new Error('加载问卷信息失败');
+                const questionnaire = await qRes.json();
+                
+                // 从extra_data中提取问卷字段的值
+                const extraData = teacherData.extra_data || {};
+                const answers = {};
+                questionnaire.fields.forEach(field => {
+                    answers[field.name] = extraData[field.name] || '';
+                });
+                
+                // 检查是否已有回答
+                let responseId = null;
+                try {
+                    const responsesRes = await fetch(`${API_BASE}/questionnaires/${questionnaireId}/responses`);
+                    if (responsesRes.ok) {
+                        const responses = await responsesRes.json();
+                        const existing = responses.find(r => r.teacher_id === teacherId);
+                        if (existing) {
+                            responseId = existing.id;
+                        }
+                    }
+                } catch (e) {
+                    console.error('检查已有回答失败:', e);
+                }
+                
+                let response;
+                if (responseId) {
+                    // 更新已有回答
+                    response = await fetch(`${API_BASE}/questionnaires/responses/${responseId}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            questionnaire_id: questionnaireId,
+                            teacher_id: teacherId,
+                            answers: answers
+                        })
+                    });
+                } else {
+                    // 创建新回答
+                    response = await fetch(`${API_BASE}/questionnaires/responses`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            questionnaire_id: questionnaireId,
+                            teacher_id: teacherId,
+                            answers: answers
+                        })
+                    });
+                }
+                
+                if (response.ok) {
+                    alert('确认成功！');
+                    // 重新加载任务详情，显示最新的填写结果
+                    await viewTaskDetail(taskId, teacherId);
+                    
+                    // 同时刷新任务列表，更新任务状态
+                    const idNumber = document.getElementById('id_number').value;
+                    const phone = document.getElementById('phone').value;
+                    
+                    // 延迟刷新任务列表，确保详情已更新
+                    setTimeout(() => {
+                        document.getElementById('auth-form').dispatchEvent(new Event('submit'));
+                    }, 500);
+                } else {
+                    const error = await response.json();
+                    alert('确认失败：' + (error.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('确认失败:', error);
+                alert('确认失败：' + error.message);
+            }
+        }
+        
+        // 提交额外占位符表单
+        async function submitExtraPlaceholderForm(taskId, teacherId, questionnaireId, form) {
+            try {
+                const formData = new FormData(form);
+                const answers = {};
+                
+                for (const [key, value] of formData.entries()) {
+                    answers[key] = value;
+                }
+                
+                // 检查是否已有回答
+                let responseId = null;
+                try {
+                    const responsesRes = await fetch(`${API_BASE}/questionnaires/${questionnaireId}/responses`);
+                    if (responsesRes.ok) {
+                        const responses = await responsesRes.json();
+                        const existing = responses.find(r => r.teacher_id === teacherId);
+                        if (existing) {
+                            responseId = existing.id;
+                        }
+                    }
+                } catch (e) {
+                    console.error('检查已有回答失败:', e);
+                }
+                
+                let response;
+                if (responseId) {
+                    // 更新已有回答
+                    response = await fetch(`${API_BASE}/questionnaires/responses/${responseId}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            questionnaire_id: questionnaireId,
+                            teacher_id: teacherId,
+                            answers: answers
+                        })
+                    });
+                } else {
+                    // 创建新回答
+                    response = await fetch(`${API_BASE}/questionnaires/responses`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            questionnaire_id: questionnaireId,
+                            teacher_id: teacherId,
+                            answers: answers
+                        })
+                    });
+                }
+                
+                if (response.ok) {
+                    alert('提交成功！');
+                    
+                    // 关闭模态框
+                    const modal = document.querySelector('.modal.show');
+                    if (modal) {
+                        modal.remove();
+                    }
+                    
+                    // 重新加载任务详情，显示最新的填写结果
+                    await viewTaskDetail(taskId, teacherId);
+                    
+                    // 同时刷新任务列表，更新任务状态
+                    const idNumber = document.getElementById('id_number').value;
+                    const phone = document.getElementById('phone').value;
+                    
+                    // 延迟刷新任务列表，确保详情已更新
+                    setTimeout(() => {
+                        document.getElementById('auth-form').dispatchEvent(new Event('submit'));
+                    }, 500);
+                } else {
+                    const error = await response.json();
+                    alert('提交失败：' + (error.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('提交失败:', error);
+                alert('提交失败：' + error.message);
+            }
+        }
+        
+        // 签名画板相关函数
+        const signatureCanvases = {};
+        const signatureContexts = {};
+        
+        function initSignatureCanvas(fieldName) {
+            console.log(`[签名画板] ========== 开始初始化 ==========`, fieldName);
+            const canvas = document.getElementById(`signature-canvas-${fieldName}`);
+            if (!canvas) {
+                console.error(`[签名画板] ✗ Canvas元素未找到: signature-canvas-${fieldName}`);
+                console.log(`[签名画板] 当前页面中的所有canvas元素:`, Array.from(document.querySelectorAll('canvas')).map(c => c.id));
+                return;
+            }
+            
+            console.log(`[签名画板] ✓ 找到canvas元素:`, canvas);
+            console.log(`[签名画板] Canvas尺寸: ${canvas.width}x${canvas.height}`);
+            console.log(`[签名画板] Canvas样式:`, {
+                display: window.getComputedStyle(canvas).display,
+                visibility: window.getComputedStyle(canvas).visibility,
+                pointerEvents: window.getComputedStyle(canvas).pointerEvents,
+                position: window.getComputedStyle(canvas).position,
+                zIndex: window.getComputedStyle(canvas).zIndex,
+                opacity: window.getComputedStyle(canvas).opacity
+            });
+            
+            // 检查是否已经初始化过，如果初始化过就跳过
+            if (signatureCanvases[fieldName] && signatureCanvases[fieldName] === canvas) {
+                console.log(`[签名画板] Canvas已经初始化过，跳过`);
+                return;
+            }
+            
+            // 移除旧的事件监听器（如果存在）- 使用克隆节点的方式彻底清除
+            const newCanvas = canvas.cloneNode(true);
+            canvas.parentNode.replaceChild(newCanvas, canvas);
+            const canvasElement = newCanvas;
+            
+            console.log(`[签名画板] ✓ Canvas已克隆并替换`);
+            
+            // 重新获取上下文
+            const ctxElement = canvasElement.getContext('2d');
+            if (!ctxElement) {
+                console.error(`[签名画板] ✗ 无法获取2D上下文`);
+                return;
+            }
+            
+            ctxElement.strokeStyle = '#000';
+            ctxElement.lineWidth = 2;
+            ctxElement.lineCap = 'round';
+            ctxElement.lineJoin = 'round';
+            ctxElement.fillStyle = '#ffffff';
+            ctxElement.fillRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            console.log(`[签名画板] ✓ 上下文已配置:`, {
+                strokeStyle: ctxElement.strokeStyle,
+                lineWidth: ctxElement.lineWidth,
+                fillStyle: ctxElement.fillStyle
+            });
+            
+            // 更新引用
+            signatureCanvases[fieldName] = canvasElement;
+            signatureContexts[fieldName] = ctxElement;
+            
+            // 重新定义绘制函数（使用新的canvas和ctx）
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+            
+            function getCanvasCoordinates(e) {
+                const rect = canvasElement.getBoundingClientRect();
+                const scaleX = canvasElement.width / rect.width;
+                const scaleY = canvasElement.height / rect.height;
+                const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+                const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+                const x = (clientX - rect.left) * scaleX;
+                const y = (clientY - rect.top) * scaleY;
+                
+                console.log(`[签名画板] 坐标计算详情:`, {
+                    eventType: e.type,
+                    clientX, clientY,
+                    rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                    scale: { scaleX, scaleY },
+                    canvasSize: { width: canvasElement.width, height: canvasElement.height },
+                    relativePos: { x: clientX - rect.left, y: clientY - rect.top },
+                    finalCoords: { x, y }
+                });
+                
+                return { x, y };
+            }
+            
+            function getTouchCoordinates(touch) {
+                const rect = canvasElement.getBoundingClientRect();
+                const scaleX = canvasElement.width / rect.width;
+                const scaleY = canvasElement.height / rect.height;
+                const x = (touch.clientX - rect.left) * scaleX;
+                const y = (touch.clientY - rect.top) * scaleY;
+                
+                console.log(`[签名画板] 触摸坐标计算:`, {
+                    touchX: touch.clientX, touchY: touch.clientY,
+                    rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                    scale: { scaleX, scaleY },
+                    result: { x, y }
+                });
+                
+                return { x, y };
+            }
+            
+            function startDrawing(e) {
+                console.log(`[签名画板] ========== mousedown事件触发 ==========`, fieldName);
+                console.log(`[签名画板] 事件详情:`, {
+                    type: e.type,
+                    target: e.target,
+                    currentTarget: e.currentTarget,
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                    button: e.button,
+                    buttons: e.buttons
+                });
+                
+                e.preventDefault();
+                e.stopPropagation();
+                
+                isDrawing = true;
+                const coords = getCanvasCoordinates(e);
+                lastX = coords.x;
+                lastY = coords.y;
+                
+                console.log(`[签名画板] 开始绘制，坐标:`, { x: lastX, y: lastY });
+                console.log(`[签名画板] isDrawing状态:`, isDrawing);
+                
+                // 在起始点画一个小点
+                try {
+                    ctxElement.beginPath();
+                    ctxElement.arc(lastX, lastY, 2, 0, 2 * Math.PI);
+                    ctxElement.fill();
+                    console.log(`[签名画板] ✓ 起始点已绘制，半径2，位置: (${lastX}, ${lastY})`);
+                } catch (error) {
+                    console.error(`[签名画板] ✗ 绘制起始点失败:`, error);
+                }
+            }
+            
+            function draw(e) {
+                if (!isDrawing) {
+                    console.log(`[签名画板] mousemove但isDrawing=false，跳过绘制`);
+                    return;
+                }
+                
+                e.preventDefault();
+                e.stopPropagation();
+                const coords = getCanvasCoordinates(e);
+                const currentX = coords.x;
+                const currentY = coords.y;
+                
+                console.log(`[签名画板] 绘制中: 从 (${lastX.toFixed(2)}, ${lastY.toFixed(2)}) 到 (${currentX.toFixed(2)}, ${currentY.toFixed(2)})`);
+                
+                try {
+                    ctxElement.beginPath();
+                    ctxElement.moveTo(lastX, lastY);
+                    ctxElement.lineTo(currentX, currentY);
+                    ctxElement.stroke();
+                    console.log(`[签名画板] ✓ 线条已绘制`);
+                } catch (error) {
+                    console.error(`[签名画板] ✗ 绘制线条失败:`, error);
+                }
+                
+                lastX = currentX;
+                lastY = currentY;
+            }
+            
+            function stopDrawing(e) {
+                console.log(`[签名画板] ========== 停止绘制 ==========`, fieldName);
+                if (e) {
+                    console.log(`[签名画板] 停止事件:`, e.type);
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                console.log(`[签名画板] isDrawing从 ${isDrawing} 变为 false`);
+                isDrawing = false;
+            }
+            
+            // 确保画布可以接收事件
+            canvasElement.style.pointerEvents = 'auto';
+            canvasElement.style.position = 'relative';
+            canvasElement.style.zIndex = '10';
+            
+            console.log(`[签名画板] 画布样式已设置:`, {
+                pointerEvents: canvasElement.style.pointerEvents,
+                position: canvasElement.style.position,
+                zIndex: canvasElement.style.zIndex
+            });
+            
+            // 绑定鼠标事件 - 不使用capture，直接绑定
+            console.log(`[签名画板] 开始绑定事件监听器...`);
+            
+            canvasElement.addEventListener('mousedown', (e) => {
+                console.log(`[签名画板] [事件捕获] mousedown事件被触发`);
+                startDrawing(e);
+            });
+            console.log(`[签名画板] ✓ mousedown事件已绑定`);
+            
+            canvasElement.addEventListener('mousemove', (e) => {
+                if (isDrawing) {
+                    console.log(`[签名画板] [事件捕获] mousemove事件被触发 (isDrawing=true)`);
+                    draw(e);
+                } else {
+                    console.log(`[签名画板] [事件捕获] mousemove事件被触发 (isDrawing=false，跳过)`);
+                }
+            });
+            console.log(`[签名画板] ✓ mousemove事件已绑定`);
+            
+            canvasElement.addEventListener('mouseup', (e) => {
+                console.log(`[签名画板] [事件捕获] mouseup事件被触发`);
+                stopDrawing(e);
+            });
+            console.log(`[签名画板] ✓ mouseup事件已绑定`);
+            
+            canvasElement.addEventListener('mouseleave', (e) => {
+                console.log(`[签名画板] [事件捕获] mouseleave事件被触发`);
+                stopDrawing(e);
+            });
+            console.log(`[签名画板] ✓ mouseleave事件已绑定`);
+            
+            // 测试：添加点击事件来验证事件是否被触发
+            canvasElement.addEventListener('click', (e) => {
+                console.log(`[签名画板] ========== click事件被触发 ==========`, fieldName);
+                console.log(`[签名画板] 点击位置:`, { clientX: e.clientX, clientY: e.clientY });
+                const rect = canvasElement.getBoundingClientRect();
+                console.log(`[签名画板] 画布位置:`, {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height
+                });
+                console.log(`[签名画板] 相对位置:`, { 
+                    x: e.clientX - rect.left, 
+                    y: e.clientY - rect.top 
+                });
+            });
+            console.log(`[签名画板] ✓ click事件已绑定（用于测试）`);
+            
+            // 添加鼠标进入事件
+            canvasElement.addEventListener('mouseenter', (e) => {
+                console.log(`[签名画板] [事件捕获] mouseenter事件被触发`);
+            });
+            
+            canvasElement.addEventListener('mouseover', (e) => {
+                console.log(`[签名画板] [事件捕获] mouseover事件被触发`);
+            });
+            
+            console.log(`[签名画板] ========== 初始化完成 ==========`, fieldName);
+            
+            // 触摸事件支持 - 使用新的canvasElement
+            canvasElement.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const touch = e.touches[0];
+                const coords = getTouchCoordinates(touch);
+                lastX = coords.x;
+                lastY = coords.y;
+                isDrawing = true;
+                
+                // 在起始点画一个小点
+                ctxElement.beginPath();
+                ctxElement.arc(lastX, lastY, 1, 0, 2 * Math.PI);
+                ctxElement.fill();
+            }, { passive: false, capture: true });
+            
+            canvasElement.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!isDrawing) return;
+                const touch = e.touches[0];
+                const coords = getTouchCoordinates(touch);
+                const currentX = coords.x;
+                const currentY = coords.y;
+                
+                ctxElement.beginPath();
+                ctxElement.moveTo(lastX, lastY);
+                ctxElement.lineTo(currentX, currentY);
+                ctxElement.stroke();
+                
+                lastX = currentX;
+                lastY = currentY;
+            }, { passive: false, capture: true });
+            
+            canvasElement.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                isDrawing = false;
+            }, { passive: false, capture: true });
+            
+            canvasElement.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                isDrawing = false;
+            }, { passive: false, capture: true });
+            
+            console.log(`Signature canvas initialized for field: ${fieldName}`, canvasElement);
+        }
+        
+        function clearSignature(fieldName) {
+            const canvas = signatureCanvases[fieldName];
+            const ctx = signatureContexts[fieldName];
+            if (canvas && ctx) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                const input = document.getElementById(`signature-input-${fieldName}`);
+                if (input) {
+                    input.value = '';
+                }
+            }
+        }
+        
+        function saveSignatureToInput(fieldName) {
+            const canvas = signatureCanvases[fieldName];
+            const input = document.getElementById(`signature-input-${fieldName}`);
+            if (canvas && input) {
+                const dataURL = canvas.toDataURL('image/png');
+                input.value = dataURL;
+                alert('签名已保存');
+            }
+        }
+        
+        // 保存签名并自动提交表单
+        async function saveSignatureAndSubmit(fieldName, taskId, teacherId, questionnaireId) {
+            // 先保存当前签名到输入框
+            const canvas = signatureCanvases[fieldName];
+            const input = document.getElementById(`signature-input-${fieldName}`);
+            if (canvas && input) {
+                const dataURL = canvas.toDataURL('image/png');
+                input.value = dataURL;
+            }
+            
+            // 自动保存所有签名字段到输入框
+            const form = document.getElementById('extra-placeholder-form');
+            if (form) {
+                // 遍历所有签名字段，确保都已保存
+                const signatureInputs = form.querySelectorAll('input[id^="signature-input-"]');
+                signatureInputs.forEach(sigInput => {
+                    const fieldNameFromId = sigInput.id.replace('signature-input-', '');
+                    const canvas = signatureCanvases[fieldNameFromId];
+                    if (canvas && !sigInput.value) {
+                        const dataURL = canvas.toDataURL('image/png');
+                        sigInput.value = dataURL;
+                    }
+                });
+                
+                // 自动提交表单
+                await submitExtraPlaceholderForm(taskId, teacherId, questionnaireId, form);
+            } else {
+                alert('未找到表单，无法提交');
+            }
+        }
+        
+        // 将函数暴露到全局作用域，供main.js使用
+        window.initSignatureCanvas = initSignatureCanvas;
+        window.clearSignature = clearSignature;
+        window.saveSignatureToInput = saveSignatureToInput;
+        window.saveSignatureAndSubmit = saveSignatureAndSubmit;
+        window.signatureCanvases = signatureCanvases;
+        window.signatureContexts = signatureContexts;
+    </script>
+</body>
+</html>
+

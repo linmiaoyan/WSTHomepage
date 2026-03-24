@@ -1,0 +1,1629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>编辑PDF占位符</title>
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .pdf-container {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            position: relative;
+            overflow: auto;
+            max-height: 80vh;
+            min-height: 600px;
+        }
+        /* 勿用 width:100% 拉伸 canvas，否则点击坐标与 PDF 点坐标会错位 */
+        #pdf-canvas {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+            height: auto;
+        }
+        .pdf-loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+        /* 如果PDF高度很大，确保容器可以滚动 */
+        .pdf-container::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+        .pdf-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .pdf-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 6px;
+        }
+        .pdf-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            min-height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        /* 占位符标记框 */
+        .placeholder-box {
+            position: absolute;
+            background: transparent;
+            border: none;
+            border-radius: 2px;
+            pointer-events: auto;
+            z-index: 100;
+            cursor: move;
+            min-width: 50px;
+            min-height: 20px;
+            padding: 0;
+            margin: 0;
+            user-select: none;
+        }
+        .placeholder-box.dragging {
+            cursor: grabbing;
+            opacity: 0.8;
+        }
+        .placeholder-box:hover .field-label {
+            background: #0a58ca;
+        }
+        .placeholder-box.signature-placeholder .field-label {
+            background: #28a745;
+        }
+        .placeholder-box.signature-placeholder:hover .field-label {
+            background: #218838;
+        }
+        .placeholder-box .field-label {
+            position: absolute;
+            top: 0;
+            left: 0;
+            background: #0d6efd;
+            color: white;
+            padding: 2px 6px;
+            font-size: 11px;
+            border-radius: 2px;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .placeholder-box .delete-btn {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 18px;
+            height: 18px;
+            padding: 0;
+            line-height: 1;
+            font-size: 12px;
+            border: none;
+            background: #dc3545;
+            color: white;
+            border-radius: 2px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+            pointer-events: auto;
+        }
+        .placeholder-box .delete-btn:hover {
+            background: #bb2d3b;
+        }
+        /* 编辑模式下的坐标输入框 */
+        .placeholder-box.editing {
+            background: rgba(255, 255, 255, 0.95);
+            border: 2px solid #0d6efd;
+            padding: 4px;
+        }
+        .placeholder-box.editing .coord-inputs {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            flex-wrap: wrap;
+            font-size: 10px;
+        }
+        .placeholder-box.editing .coord-inputs label {
+            font-size: 10px;
+            margin: 0;
+            white-space: nowrap;
+        }
+        .placeholder-box.editing .coord-inputs input {
+            width: 60px;
+            font-size: 10px;
+            padding: 2px 4px;
+            border: 1px solid #ccc;
+            border-radius: 2px;
+        }
+        .fields-panel {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .position-item {
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #0d6efd;
+        }
+        .position-item:hover {
+            background: #e9ecef;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row mb-3">
+            <div class="col-12">
+                <h3 id="template-name">编辑PDF占位符</h3>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/admin">管理员界面</a></li>
+                        <li class="breadcrumb-item"><a href="/admin#page-templates">模板管理</a></li>
+                        <li class="breadcrumb-item active">编辑占位符</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+        
+        <div class="row">
+            <!-- 左侧：PDF显示区域 -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>PDF预览</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-sm btn-primary" id="render-preview-btn" onclick="renderFinalPreview()">
+                                <i class="bi bi-eye"></i> 渲染最终效果
+                            </button>
+                            <label class="me-2">页码：</label>
+                            <select id="page-select" class="form-select form-select-sm d-inline-block" style="width: auto;">
+                                <option value="0">第 1 页</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="pdf-container" id="pdf-container">
+                            <div class="overlay" id="overlay"></div>
+                            <div id="pdf-loading" class="pdf-loading">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">加载PDF中...</span>
+                                </div>
+                                <p class="mt-2">正在加载PDF...</p>
+                            </div>
+                            <canvas id="pdf-canvas"></canvas>
+                        </div>
+                        <div class="p-3 bg-light">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    <strong>使用说明：</strong>
+                                    <ul class="mb-0" style="padding-left: 20px;">
+                                        <li>点击PDF上的位置，在弹出的对话框中选择要添加的字段、常量或新增变量</li>
+                                        <li>已添加的占位符会显示为蓝色框，点击可编辑坐标</li>
+                                        <li>点击占位符框右上角的红色按钮可删除</li>
+                                    </ul>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右侧：占位符列表 -->
+            <div class="col-md-4">
+                <!-- 全局字体大小设置 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <strong><i class="bi bi-fonts"></i> 全局字体设置</strong>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="global-font-size" class="form-label">默认字体大小：<span id="global-font-size-value">12</span>px</label>
+                            <input type="range" class="form-range" id="global-font-size" min="8" max="72" value="12" 
+                                   oninput="updateGlobalFontSize(this.value)">
+                            <div class="d-flex justify-content-between">
+                                <small class="text-muted">8px</small>
+                                <small class="text-muted">72px</small>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary w-100" onclick="applyGlobalFontSize()">
+                            <i class="bi bi-check-circle"></i> 应用到所有占位符
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>已添加的占位符</strong>
+                        <button class="btn btn-sm btn-outline-danger" onclick="clearAllPlaceholders()">清除全部</button>
+                    </div>
+                    <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                        <div id="positions-list">
+                            <p class="text-muted text-center">暂无占位符</p>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="btn btn-primary w-100" onclick="savePlaceholders()">保存占位符位置</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <!-- PDF.js库（本地） -->
+    <script src="/static/js/pdf.min.js"></script>
+    <script>
+        // 配置PDF.js worker（本地）
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/js/pdf.worker.min.js';
+        }
+    </script>
+    <script>
+        const API_BASE = '/api';
+        
+        // 获取管理员token
+        const adminToken = localStorage.getItem('admin_token');
+        if (!adminToken) {
+            alert('请先登录管理员账号');
+            window.location.href = '/admin/login?return_url=' + encodeURIComponent(window.location.href);
+            throw new Error('未登录');
+        }
+        
+        // 重写fetch以自动添加token
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            if (args[0] && (args[0].startsWith('/api/') || args[0].startsWith(API_BASE))) {
+                if (!args[1]) args[1] = {};
+                if (!args[1].headers) args[1].headers = {};
+                args[1].headers['X-Admin-Token'] = adminToken;
+            }
+            return originalFetch.apply(this, args);
+        };
+        
+        let templateId = null;
+        let templateData = null;
+        let availableFields = [];
+        let placeholderPositions = [];
+        let currentPage = 0;
+        let pdfScale = 1;
+        let pdfPageWidth = 595;  // 默认A4宽度（点）
+        let pdfPageHeight = 842; // 默认A4高度（点）
+        /** 当前页 PDF.js 的 rotation（与 /Rotate 一致），保存到占位符供排查 */
+        let currentPageRotation = 0;
+        let globalFontSize = 12;  // 全局默认字体大小
+        
+        // PDF.js相关变量
+        let pdfDoc = null;
+        let pdfPage = null;
+        let renderContext = null;
+        
+        // PDF显示尺寸（屏幕像素）
+        let pdfDisplayWidth = 0;
+        let pdfDisplayHeight = 0;
+        let pdfScaleX = 1;  // PDF点 到 屏幕像素的X比例
+        let pdfScaleY = 1;  // PDF点 到 屏幕像素的Y比例
+        
+        // 点击模式相关变量
+        let isClickMode = false;
+        let isExtraPlaceholderMode = false;  // 是否处于添加额外占位符模式
+        let extraPlaceholderName = '';  // 当前要添加的额外占位符名称
+        
+        // 从URL获取模板ID
+        const urlParams = new URLSearchParams(window.location.search);
+        templateId = parseInt(urlParams.get('id'));
+        
+        if (!templateId) {
+            alert('缺少模板ID参数');
+            window.location.href = '/admin';
+        }
+        
+        // 加载模板信息和可用字段
+        async function loadData() {
+            try {
+                const [templateRes, fieldsRes] = await Promise.all([
+                    fetch(`${API_BASE}/templates/${templateId}`),
+                    fetch(`${API_BASE}/templates/available-fields`)
+                ]);
+                
+                if (!templateRes.ok || !fieldsRes.ok) {
+                    throw new Error('加载数据失败');
+                }
+                
+                templateData = await templateRes.json();
+                const fieldsData = await fieldsRes.json();
+                availableFields = fieldsData.all_fields || [];
+                
+                // 检查是否为PDF
+                if (templateData.file_type !== '.pdf') {
+                    alert('此模板不是PDF文件');
+                    window.location.href = '/admin';
+                    return;
+                }
+                
+                // 更新页面标题
+                document.getElementById('template-name').textContent = `编辑PDF占位符 - ${templateData.name}`;
+                
+                // 加载占位符位置
+                placeholderPositions = templateData.placeholder_positions || [];
+                
+                // 如果占位符中有字体大小，使用第一个非默认值作为全局字体大小
+                const fontSizes = placeholderPositions.map(p => p.font_size).filter(fs => fs != null && fs !== 12);
+                if (fontSizes.length > 0) {
+                    // 使用最常见的字体大小，如果没有则使用第一个
+                    const mostCommon = fontSizes.reduce((a, b, i, arr) => 
+                        arr.filter(v => v === a).length >= arr.filter(v => v === b).length ? a : b
+                    );
+                    globalFontSize = mostCommon;
+                    document.getElementById('global-font-size').value = globalFontSize;
+                    document.getElementById('global-font-size-value').textContent = globalFontSize;
+                }
+                
+                // 加载PDF信息
+                const pdfInfoRes = await fetch(`${API_BASE}/templates/${templateId}/content`);
+                if (pdfInfoRes.ok) {
+                    const pdfInfo = await pdfInfoRes.json();
+                    updatePageSelect(pdfInfo.num_pages || 1);
+                    // 保存实际PDF尺寸
+                    if (pdfInfo.page_width) {
+                        pdfPageWidth = pdfInfo.page_width;
+                    }
+                    if (pdfInfo.page_height) {
+                        pdfPageHeight = pdfInfo.page_height;
+                    }
+                }
+                
+                // 加载PDF文件（会在加载完成后初始化点击模式）
+                await loadPDF();
+                
+                // 渲染占位符列表
+                renderPositions();
+                
+            } catch (error) {
+                console.error('加载数据失败:', error);
+                alert('加载数据失败：' + error.message);
+            }
+        }
+        
+        // 更新页码选择器
+        function updatePageSelect(numPages) {
+            const select = document.getElementById('page-select');
+            select.innerHTML = '';
+            for (let i = 0; i < numPages; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `第 ${i + 1} 页`;
+                select.appendChild(option);
+            }
+            select.addEventListener('change', async function() {
+                currentPage = parseInt(this.value);
+                await loadPDF();
+            });
+        }
+        
+        // 计算PDF显示尺寸和比例
+        function calculatePDFScale() {
+            const canvas = document.getElementById('pdf-canvas');
+            
+            if (!canvas) return;
+            
+            // 获取canvas的实际显示尺寸（考虑浏览器缩放）
+            const canvasRect = canvas.getBoundingClientRect();
+            pdfDisplayWidth = canvasRect.width || canvas.offsetWidth || 800;
+            pdfDisplayHeight = canvasRect.height || canvas.offsetHeight || 1000;
+            
+            // 获取canvas的逻辑尺寸（用于坐标转换）
+            const canvasLogicalWidth = canvas.width || pdfDisplayWidth;
+            const canvasLogicalHeight = canvas.height || pdfDisplayHeight;
+            
+            // 计算实际显示尺寸与逻辑尺寸的比例（考虑浏览器缩放和设备像素比）
+            const displayToLogicalRatioX = pdfDisplayWidth / canvasLogicalWidth;
+            const displayToLogicalRatioY = pdfDisplayHeight / canvasLogicalHeight;
+            
+            // 计算比例：逻辑像素 / PDF点
+            const logicalScaleX = canvasLogicalWidth / pdfPageWidth;
+            const logicalScaleY = canvasLogicalHeight / pdfPageHeight;
+            
+            // 最终比例：显示像素 / PDF点（考虑浏览器缩放）
+            pdfScaleX = logicalScaleX * displayToLogicalRatioX;
+            pdfScaleY = logicalScaleY * displayToLogicalRatioY;
+            
+            console.log('PDF尺寸:', {
+                'PDF点': `${pdfPageWidth.toFixed(2)} x ${pdfPageHeight.toFixed(2)}`,
+                'Canvas逻辑': `${canvasLogicalWidth.toFixed(2)} x ${canvasLogicalHeight.toFixed(2)}`,
+                'Canvas显示': `${pdfDisplayWidth.toFixed(2)} x ${pdfDisplayHeight.toFixed(2)}`,
+                '比例': `X: ${pdfScaleX.toFixed(4)}, Y: ${pdfScaleY.toFixed(4)}`,
+                '缩放比': `X: ${displayToLogicalRatioX.toFixed(4)}, Y: ${displayToLogicalRatioY.toFixed(4)}`
+            });
+        }
+        
+        // PDF坐标（点）转屏幕坐标（像素）
+        function pdfToScreen(pdfX, pdfY) {
+            // PDF坐标系：原点在左下角，Y向上
+            // 屏幕坐标系：原点在左上角，Y向下
+            // 使用实际显示尺寸计算
+            const canvas = document.getElementById('pdf-canvas');
+            if (!canvas) return { x: 0, y: 0 };
+            
+            // 重新计算比例以确保准确性
+            calculatePDFScale();
+            
+            const screenX = pdfX * pdfScaleX;
+            const screenY = pdfDisplayHeight - (pdfY * pdfScaleY);  // Y轴翻转
+            return { x: screenX, y: screenY };
+        }
+        
+        // 屏幕坐标（像素）转PDF坐标（点）
+        // screenX, screenY 应该是相对于canvas显示区域的坐标（已包含滚动偏移）
+        function screenToPdf(screenX, screenY) {
+            const canvas = document.getElementById('pdf-canvas');
+            if (!canvas) return { x: 0, y: 0 };
+            
+            // 重新计算比例以确保准确性
+            calculatePDFScale();
+            
+            // screenX和screenY是相对于canvas显示区域的坐标（已包含滚动偏移）
+            // pdfScaleX和pdfScaleY已经是考虑了浏览器缩放的比例（显示像素 / PDF点）
+            // 所以可以直接转换
+            const pdfX = screenX / pdfScaleX;
+            
+            // Y轴翻转：屏幕坐标系（原点在左上，Y向下）转PDF坐标系（原点在左下，Y向上）
+            // 屏幕上方（Y小）对应PDF上方（Y大）
+            // 注意：screenY是相对于canvas显示区域的坐标，需要相对于pdfDisplayHeight进行翻转
+            const pdfY = (pdfDisplayHeight - screenY) / pdfScaleY;
+            
+            // 验证坐标是否在有效范围内
+            if (pdfY < 0 || pdfY > pdfPageHeight) {
+                console.warn('PDF Y坐标超出范围:', {
+                    screenY: screenY.toFixed(2),
+                    pdfDisplayHeight: pdfDisplayHeight.toFixed(2),
+                    pdfScaleY: pdfScaleY.toFixed(4),
+                    pdfY: pdfY.toFixed(2),
+                    pdfPageHeight: pdfPageHeight.toFixed(2)
+                });
+            }
+            
+            return { x: pdfX, y: pdfY };
+        }
+        
+        // 加载PDF文件（使用PDF.js）
+        async function loadPDF() {
+            const canvas = document.getElementById('pdf-canvas');
+            const loadingDiv = document.getElementById('pdf-loading');
+            const container = document.getElementById('pdf-container');
+            const overlay = document.getElementById('overlay');
+            const ctx = canvas.getContext('2d');
+            
+            try {
+                // 显示加载提示
+                loadingDiv.style.display = 'block';
+                canvas.style.display = 'none';
+                
+                // 加载PDF文档
+                const pdfUrl = `${API_BASE}/templates/${templateId}/pdf-file`;
+                const loadingTask = pdfjsLib.getDocument(pdfUrl);
+                pdfDoc = await loadingTask.promise;
+                
+                // 获取当前页
+                pdfPage = await pdfDoc.getPage(currentPage + 1);
+                
+                // 获取PDF页面的实际尺寸（点）
+                const viewport = pdfPage.getViewport({ scale: 1.0 });
+                pdfPageWidth = viewport.width;
+                pdfPageHeight = viewport.height;
+                currentPageRotation = pdfPage.rotate || 0;
+                
+                // 计算缩放比例以适应容器宽度
+                const containerWidth = container.clientWidth - 20; // 减去padding
+                const scale = containerWidth / pdfPageWidth;
+                const scaledViewport = pdfPage.getViewport({ scale: scale });
+                
+                // 设置canvas尺寸
+                canvas.height = scaledViewport.height;
+                canvas.width = scaledViewport.width;
+                
+                // 渲染PDF页面
+                renderContext = {
+                    canvasContext: ctx,
+                    viewport: scaledViewport
+                };
+                
+                await pdfPage.render(renderContext).promise;
+                
+                // 隐藏加载提示，显示canvas
+                loadingDiv.style.display = 'none';
+                canvas.style.display = 'block';
+                
+                // 等待下一帧，确保布局完成后再计算尺寸
+                requestAnimationFrame(() => {
+                    // 计算PDF显示尺寸和比例
+                    calculatePDFScale();
+                    
+                    // 设置overlay尺寸（使用实际显示尺寸）
+                    const canvasRect = canvas.getBoundingClientRect();
+                    overlay.style.height = canvasRect.height + 'px';
+                    overlay.style.width = canvasRect.width + 'px';
+                    
+                    // 确保容器可以滚动
+                    container.style.overflow = 'auto';
+                    
+                    // 如果处于预览模式，退出预览模式（重新加载PDF时）
+                    if (previewMode) {
+                        previewMode = false;
+                        originalCanvasImage = null;
+                        const previewBtn = document.getElementById('render-preview-btn');
+                        if (previewBtn) {
+                            previewBtn.innerHTML = '<i class="bi bi-eye"></i> 渲染最终效果';
+                            previewBtn.classList.remove('btn-secondary');
+                            previewBtn.classList.add('btn-primary');
+                        }
+                    }
+                    
+                    // 渲染标记
+                    renderMarkers();
+                    
+                    // 初始化点击模式（确保在PDF加载完成且overlay尺寸设置后）
+                    initClickMode();
+                    
+                    // 初始化resize监听（如果还没有初始化）
+                    initResizeObserver();
+                });
+                
+            } catch (error) {
+                console.error('加载PDF失败:', error);
+                loadingDiv.innerHTML = '<p class="text-danger">加载PDF失败：' + error.message + '</p>';
+            }
+        }
+        
+        // 初始化点击模式
+        let clickModeInitialized = false;
+        function initClickMode() {
+            const overlay = document.getElementById('overlay');
+            if (!overlay) return;
+            
+            // 启用overlay点击
+            overlay.style.pointerEvents = 'auto';
+            overlay.style.cursor = 'crosshair';
+            
+            // 只绑定一次点击事件，避免重复绑定
+            if (!clickModeInitialized) {
+                overlay.addEventListener('click', onPdfClick);
+                clickModeInitialized = true;
+            }
+        }
+        
+        // PDF点击事件
+        async function onPdfClick(e) {
+            // 如果点击的是占位符框，不处理
+            if (e.target.closest('.placeholder-box')) {
+                return;
+            }
+            
+            // 如果点击的是canvas或overlay（包括overlay的子元素），使用canvas的坐标
+            const canvas = document.getElementById('pdf-canvas');
+            const overlay = document.getElementById('overlay');
+            
+            // 检查点击是否在overlay或canvas上
+            const isClickOnOverlay = overlay && (e.target === overlay || overlay.contains(e.target));
+            const isClickOnCanvas = e.target === canvas;
+            
+            if (isClickOnCanvas || isClickOnOverlay) {
+                // 获取canvas的实际显示位置和尺寸（考虑浏览器缩放）
+                const canvasRect = canvas.getBoundingClientRect();
+                
+                // 计算点击位置相对于canvas显示区域的坐标（考虑浏览器缩放）
+                // e.clientX/Y 是相对于视口的坐标，需要转换为相对于canvas的坐标
+                const clickX = e.clientX - canvasRect.left;
+                const clickY = e.clientY - canvasRect.top;
+                
+                // 由于 clickX/clickY 是相对于 canvasRect（已随滚动变化）计算的，
+                // 因此它们已经是相对于 canvas 内容坐标系的值；不要再叠加 scroll 偏移。
+                const screenX = clickX;
+                const screenY = clickY;
+                
+                // 重新计算比例（确保使用最新的比例，包括浏览器缩放）
+                calculatePDFScale();
+                
+                // 转换为PDF坐标
+                const pdfCoords = screenToPdf(screenX, screenY);
+                
+                // 调试信息：输出坐标转换过程
+                console.log('点击坐标转换:', {
+                    '点击位置(视口)': `(${clickX.toFixed(1)}, ${clickY.toFixed(1)})`,
+                    '屏幕坐标(含滚动)': `(${screenX.toFixed(1)}, ${screenY.toFixed(1)})`,
+                    'PDF坐标': `(${pdfCoords.x.toFixed(2)}, ${pdfCoords.y.toFixed(2)})`,
+                    'PDF页面尺寸': `${pdfPageWidth.toFixed(2)} x ${pdfPageHeight.toFixed(2)}`,
+                    '显示尺寸': `${pdfDisplayWidth.toFixed(2)} x ${pdfDisplayHeight.toFixed(2)}`,
+                    '比例': `X: ${pdfScaleX.toFixed(4)}, Y: ${pdfScaleY.toFixed(4)}`
+                });
+                
+                // 保存坐标到全局变量
+                window.tempPdfX = pdfCoords.x;
+                window.tempPdfY = pdfCoords.y;
+                
+                // 如果是额外占位符模式，直接添加
+                if (isExtraPlaceholderMode && extraPlaceholderName) {
+                    addPlaceholder(extraPlaceholderName, false, true);  // 第三个参数表示是额外占位符
+                    // 退出额外占位符模式
+                    isExtraPlaceholderMode = false;
+                    extraPlaceholderName = '';
+                    // 移除提示
+                    const hint = document.getElementById('extra-placeholder-hint');
+                    if (hint) hint.remove();
+                } else {
+                    // 显示字段选择界面
+                    await showFieldSelector(pdfCoords.x, pdfCoords.y);
+                }
+                
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }
+        
+        // 启用额外占位符模式（已移除右侧面板，此函数保留用于兼容性）
+        function enableExtraPlaceholderMode() {
+            // 额外占位符功能现在通过点击PDF后弹出的模态框中的"新增变量"来完成
+            // 此函数保留用于兼容性，但不执行任何操作
+            alert('请先点击PDF上的位置，然后在弹出的对话框中选择"新增变量"来添加额外占位符');
+        }
+        
+        // 显示字段选择器
+        async function showFieldSelector(pdfX, pdfY) {
+            // VL 建议（方案B）：只建议字段，不自动定位坐标
+            let vlSuggestions = [];
+            try {
+                const resp = await fetch(`${API_BASE}/vl/suggest-fields`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        template_id: templateId,
+                        page: currentPage,
+                        x: pdfX,
+                        y: pdfY
+                    })
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    vlSuggestions = data.suggestions || [];
+                }
+            } catch (e) {
+                console.warn('VL建议获取失败（继续使用手动选择）', e);
+            }
+            
+            // 创建模态框
+            const modal = document.createElement('div');
+            modal.className = 'modal fade show';
+            modal.style.display = 'block';
+            modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            modal.innerHTML = `
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">选择占位符</h5>
+                            <button type="button" class="btn-close" onclick="closeFieldSelector()"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">常用常量：</label>
+                                <select id="modal-constant-select" class="form-select form-select-sm mb-2">
+                                    <option value="">选择常量...</option>
+                                    <option value="是">是</option>
+                                    <option value="否">否</option>
+                                    <option value="不">不</option>
+                                    <option value="同意">同意</option>
+                                    <option value="不同意">不同意</option>
+                                    <option value="已知晓">已知晓</option>
+                                    <option value="未知晓">未知晓</option>
+                                    <option value="有">有</option>
+                                    <option value="无">无</option>
+                                    <option value="正常">正常</option>
+                                    <option value="异常">异常</option>
+                                    <option value="合格">合格</option>
+                                    <option value="不合格">不合格</option>
+                                    <option value="已完成">已完成</option>
+                                    <option value="未完成">未完成</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">或选择字段：</label>
+                                <div id="modal-fields-list" style="max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
+                                    ${renderFieldsForModal()}
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">或新增变量：</label>
+                                <div class="mb-2">
+                                    <label class="form-label small">变量类型：</label>
+                                    <div class="btn-group w-100" role="group">
+                                        <input type="radio" class="btn-check" name="variable-type" id="variable-type-text" value="text" checked>
+                                        <label class="btn btn-outline-primary btn-sm" for="variable-type-text">
+                                            <i class="bi bi-type"></i> 文本输入
+                                        </label>
+                                        
+                                        <input type="radio" class="btn-check" name="variable-type" id="variable-type-signature" value="signature">
+                                        <label class="btn btn-outline-primary btn-sm" for="variable-type-signature">
+                                            <i class="bi bi-pen"></i> 手写签名
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="modal-new-variable" 
+                                           placeholder="输入新变量名称（如：备注、说明等）">
+                                    <button class="btn btn-outline-primary" type="button" onclick="addNewVariableFromModal()">
+                                        <i class="bi bi-plus-circle"></i> 添加
+                                    </button>
+                                </div>
+                                <small class="text-muted" id="variable-type-hint">新增的变量将作为文本输入占位符，需要用户填写</small>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" onclick="closeFieldSelector()">取消</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            // 插入 VL 建议按钮（在“常用常量”之后，字段选择之前）
+            try {
+                if (vlSuggestions && vlSuggestions.length > 0) {
+                    const bodyEl = modal.querySelector('.modal-body');
+                    if (bodyEl) {
+                        const buttonsHtml = vlSuggestions.map(s => {
+                            const fn = s.field_name;
+                            const field = availableFields.find(f => f.name === fn);
+                            const label = field ? field.label : fn;
+                            const conf = (s.confidence != null && !isNaN(parseFloat(s.confidence))) ? (parseFloat(s.confidence) * 100).toFixed(0) : null;
+                            const title = conf != null ? `置信度 ${conf}%` : '';
+                            return `<button class="btn btn-sm btn-outline-primary field-btn" title="${title}" onclick="addPlaceholder('${fn}', false, false); closeFieldSelector()">` +
+                                `${label}` +
+                                `</button>`;
+                        }).join('');
+                        const sugDiv = document.createElement('div');
+                        sugDiv.className = 'mb-3';
+                        sugDiv.innerHTML = `
+                            <label class="form-label">VL建议（可直接点）：</label>
+                            <div class="d-flex flex-wrap gap-2">${buttonsHtml}</div>
+                        `;
+                        bodyEl.prepend(sugDiv);
+                    }
+                }
+            } catch (e) {
+                console.warn('渲染 VL 建议失败', e);
+            }
+            
+            document.body.appendChild(modal);
+            
+            // 保存坐标到全局变量，供选择函数使用
+            window.tempPdfX = pdfX;
+            window.tempPdfY = pdfY;
+            
+            // 绑定常量选择事件
+            document.getElementById('modal-constant-select').addEventListener('change', function() {
+                if (this.value) {
+                    addPlaceholder(this.value, true);
+                    closeFieldSelector();
+                }
+            });
+            
+            // 绑定字段按钮事件
+            modal.querySelectorAll('.field-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const fieldName = this.dataset.field;
+                    addPlaceholder(fieldName, false, false);
+                    closeFieldSelector();
+                });
+            });
+            
+            // 绑定变量类型选择事件，更新提示文本
+            const typeTextRadio = document.getElementById('variable-type-text');
+            const typeSignatureRadio = document.getElementById('variable-type-signature');
+            const typeHint = document.getElementById('variable-type-hint');
+            
+            typeTextRadio.addEventListener('change', function() {
+                if (this.checked) {
+                    typeHint.textContent = '新增的变量将作为文本输入占位符，需要用户填写';
+                }
+            });
+            
+            typeSignatureRadio.addEventListener('change', function() {
+                if (this.checked) {
+                    typeHint.textContent = '新增的变量将作为签名占位符，需要用户上传签名图片';
+                }
+            });
+        }
+        
+        // 从模态框添加新变量
+        function addNewVariableFromModal() {
+            const input = document.getElementById('modal-new-variable');
+            const variableName = input.value.trim();
+            
+            if (!variableName) {
+                alert('请输入变量名称');
+                return;
+            }
+            
+            // 确保使用模态框显示时保存的坐标（这些坐标是点击时的准确坐标）
+            // window.tempPdfX 和 window.tempPdfY 已经在 showFieldSelector 中设置
+            if (window.tempPdfX == null || window.tempPdfY == null) {
+                alert('坐标信息丢失，请重新点击PDF位置');
+                return;
+            }
+            
+            // 获取选择的变量类型
+            const typeTextRadio = document.getElementById('variable-type-text');
+            const isSignature = typeTextRadio ? !typeTextRadio.checked : false;
+            
+            // 添加为额外占位符，如果是签名类型，设置is_signature标记
+            addPlaceholder(variableName, false, true, isSignature);
+            closeFieldSelector();
+        }
+        
+        // 添加占位符
+        function addPlaceholder(fieldName, isConstant = false, isExtra = false, isSignature = false) {
+            // 如果没有明确指定isSignature，则检查变量名是否包含"签名"
+            if (!isSignature) {
+                isSignature = fieldName.includes('签名') || fieldName.includes('signature');
+            }
+            
+            // 确保坐标值有效，如果未设置则使用默认值0
+            const x = (window.tempPdfX != null && !isNaN(window.tempPdfX)) ? window.tempPdfX : 0;
+            const y = (window.tempPdfY != null && !isNaN(window.tempPdfY)) ? window.tempPdfY : 0;
+            
+            // 如果坐标无效，给出提示
+            if ((x === 0 && y === 0) || (window.tempPdfX == null || window.tempPdfY == null)) {
+                console.warn('警告：占位符坐标可能无效', {
+                    fieldName: fieldName,
+                    isExtra: isExtra,
+                    tempPdfX: window.tempPdfX,
+                    tempPdfY: window.tempPdfY,
+                    'PDF页面高度': pdfPageHeight
+                });
+            }
+            
+            // 调试信息：输出添加占位符的坐标
+            if (isExtra) {
+                console.log('添加额外占位符:', {
+                    fieldName: fieldName,
+                    'PDF坐标': `(${x.toFixed(2)}, ${y.toFixed(2)})`,
+                    'PDF页面高度': pdfPageHeight.toFixed(2),
+                    '坐标位置': y < 50 ? '底部(可能有问题)' : (y > pdfPageHeight - 50 ? '顶部' : '中间')
+                });
+            }
+            
+            placeholderPositions.push({
+                field_name: fieldName,
+                page: currentPage,
+                x: x,
+                y: y,
+                font_size: globalFontSize,  // 使用全局字体大小
+                is_constant: isConstant,
+                constant_value: isConstant ? fieldName : null,
+                is_extra: isExtra,  // 标记为额外占位符
+                is_signature: isSignature  // 标记为签名类型
+            });
+            
+            renderPositions();
+            renderMarkers();
+        }
+        
+        // 渲染字段列表（用于模态框）
+        function renderFieldsForModal() {
+            const fieldsByCategory = {};
+            
+            availableFields.forEach(field => {
+                if (!fieldsByCategory[field.category]) {
+                    fieldsByCategory[field.category] = [];
+                }
+                fieldsByCategory[field.category].push(field);
+            });
+            
+            let html = '';
+            Object.keys(fieldsByCategory).forEach(category => {
+                html += `<div class="mb-3"><h6 style="font-size: 0.9em; color: #666; margin-bottom: 8px;">${category}</h6>`;
+                html += '<div class="d-flex flex-wrap gap-2">';
+                fieldsByCategory[category].forEach(field => {
+                    html += `<button class="btn btn-sm btn-outline-primary field-btn" data-field="${field.name}" title="${field.label}">${field.label || field.name}</button>`;
+                });
+                html += '</div></div>';
+            });
+            
+            return html || '<p class="text-muted text-center">暂无可用字段</p>';
+        }
+        
+        // 添加占位符
+        
+        // 关闭字段选择器
+        function closeFieldSelector() {
+            const modal = document.querySelector('.modal.show');
+            if (modal) {
+                modal.remove();
+            }
+            window.tempPdfX = null;
+            window.tempPdfY = null;
+        }
+        
+        // 渲染字段列表（用于右侧面板）- 已移除，不再需要
+        function renderFields() {
+            // 字段列表已移除，此函数保留用于兼容性，但不执行任何操作
+        }
+        
+        // 插入常量（保留用于右侧面板的常量下拉框，但需要先点击PDF位置）- 已移除，不再需要
+        function insertConstant(value) {
+            // 常量选择面板已移除，此函数保留用于兼容性，但不执行任何操作
+        }
+        
+        // 渲染占位符框
+        function renderMarkers() {
+            const overlay = document.getElementById('overlay');
+            const canvas = document.getElementById('pdf-canvas');
+            
+            if (!overlay || !canvas) return;
+            
+            // 清除现有标记，但保留选择框（如果正在选择）
+            const existingBoxes = overlay.querySelectorAll('.placeholder-box');
+            existingBoxes.forEach(box => box.remove());
+            
+            // 重新计算比例（确保使用最新的比例，包括浏览器缩放）
+            calculatePDFScale();
+            
+            // 同步更新overlay尺寸
+            const canvasRect = canvas.getBoundingClientRect();
+            overlay.style.height = canvasRect.height + 'px';
+            overlay.style.width = canvasRect.width + 'px';
+            
+            // 只显示当前页的标记
+            const currentPagePositions = placeholderPositions.filter(p => p.page === currentPage);
+            
+            currentPagePositions.forEach((pos, idx) => {
+                const posIndex = placeholderPositions.indexOf(pos);
+                const placeholderBox = document.createElement('div');
+                placeholderBox.className = 'placeholder-box';
+                placeholderBox.dataset.positionIndex = posIndex;
+                
+                // 使用稳定的坐标转换函数
+                // pdfToScreen返回的是相对于canvas显示区域的坐标（不考虑滚动）
+                // 因为overlay是绝对定位在canvas上的，所以直接使用这个坐标即可
+                const screenCoords = pdfToScreen(pos.x, pos.y);
+                
+                // 设置位置（只显示标签，不显示蓝色区域）
+                // 标签直接显示在点击位置，不额外偏移
+                // 注意：占位符框的位置是相对于overlay的，而overlay是绝对定位在canvas上的
+                // 所以不需要考虑滚动偏移，因为overlay会跟随canvas一起滚动
+                placeholderBox.style.left = screenCoords.x + 'px';
+                placeholderBox.style.top = screenCoords.y + 'px';  // 无额外偏移
+                placeholderBox.style.width = 'auto';
+                placeholderBox.style.height = 'auto';
+                placeholderBox.style.minHeight = '20px'; // 确保有可点击区域
+                
+                // 获取字段显示名称
+                const field = availableFields.find(f => f.name === pos.field_name);
+                const isConstant = pos.is_constant || false;
+                const isExtra = pos.is_extra || false;
+                const isSignature = pos.is_signature || false;
+                let displayName = '';
+                if (isConstant) {
+                    displayName = `常量: ${pos.constant_value || pos.field_name}`;
+                } else if (isExtra) {
+                    if (isSignature) {
+                        displayName = `签名: ${pos.field_name}`;
+                    } else {
+                        displayName = `额外: ${pos.field_name}`;
+                    }
+                } else {
+                    displayName = field ? field.label : pos.field_name;
+                }
+                
+                // 如果是签名类型，添加特殊样式类
+                if (isSignature) {
+                    placeholderBox.classList.add('signature-placeholder');
+                }
+                
+                // 创建标签和删除按钮
+                placeholderBox.innerHTML = `
+                    <div class="field-label">${displayName}</div>
+                    <button class="delete-btn" onclick="removePosition(${posIndex})" title="删除">×</button>
+                `;
+                
+                // 添加拖动功能
+                let isDragging = false;
+                let dragStartX = 0;
+                let dragStartY = 0;
+                let dragStartLeft = 0;
+                let dragStartTop = 0;
+                let hasDragged = false; // 标记是否真正拖动过
+                let mouseDownX = 0;
+                let mouseDownY = 0;
+                
+                const handleMouseMove = function(e) {
+                    // 如果还没有开始拖动，检查移动距离
+                    if (!isDragging) {
+                        const moveDistance = Math.sqrt(
+                            Math.pow(e.clientX - mouseDownX, 2) + 
+                            Math.pow(e.clientY - mouseDownY, 2)
+                        );
+                        // 移动超过5像素才开始拖动
+                        if (moveDistance > 5) {
+                            isDragging = true;
+                            placeholderBox.classList.add('dragging');
+                        } else {
+                            return; // 移动距离太小，不处理
+                        }
+                    }
+                    
+                    // 标记为已拖动
+                    hasDragged = true;
+                    
+                    // 计算移动距离
+                    const deltaX = e.clientX - dragStartX;
+                    const deltaY = e.clientY - dragStartY;
+                    
+                    // 更新占位符框位置
+                    const newLeft = dragStartLeft + deltaX;
+                    const newTop = dragStartTop + deltaY;
+                    
+                    placeholderBox.style.left = newLeft + 'px';
+                    placeholderBox.style.top = newTop + 'px';
+                    
+                    e.preventDefault();
+                };
+                
+                const handleMouseUp = function(e) {
+                    const wasDragging = isDragging;
+                    
+                    if (isDragging) {
+                        isDragging = false;
+                        placeholderBox.classList.remove('dragging');
+                        
+                        // 如果拖动过，更新坐标
+                        if (hasDragged) {
+                            // 获取最终位置（相对于overlay的坐标）
+                            const finalLeft = parseFloat(placeholderBox.style.left) || 0;
+                            const finalTop = parseFloat(placeholderBox.style.top) || 0;
+
+                            // finalLeft/finalTop 已经是相对于 canvas 内容坐标系的值（overlay 跟随 canvas 滚动），
+                            // 因此不需要再叠加 container.scrollLeft/scrollTop。
+                            const screenX = finalLeft;
+                            const screenY = finalTop;
+                            
+                            // 转换为PDF坐标
+                            const pdfCoords = screenToPdf(screenX, screenY);
+                            
+                            // 更新占位符坐标
+                            const pos = placeholderPositions[posIndex];
+                            if (pos) {
+                                pos.x = pdfCoords.x;
+                                pos.y = pdfCoords.y;
+                                
+                                console.log('拖动更新坐标:', {
+                                    '相对于overlay': `(${finalLeft.toFixed(1)}, ${finalTop.toFixed(1)})`,
+                                    '屏幕坐标': `(${screenX.toFixed(1)}, ${screenY.toFixed(1)})`,
+                                    'PDF坐标': `(${pdfCoords.x.toFixed(2)}, ${pdfCoords.y.toFixed(2)})`,
+                                    '字段': pos.field_name
+                                });
+                            }
+                        }
+                    }
+                    
+                    // 移除事件监听器
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                    
+                    // 如果拖动过，延迟重置标记，避免触发点击事件
+                    if (wasDragging && hasDragged) {
+                        setTimeout(() => {
+                            hasDragged = false;
+                        }, 50);
+                    } else {
+                        hasDragged = false;
+                    }
+                    
+                    e.preventDefault();
+                };
+                
+                placeholderBox.addEventListener('mousedown', function(e) {
+                    // 如果点击的是删除按钮，不启动拖动
+                    if (e.target.classList.contains('delete-btn') || e.target.closest('.delete-btn')) {
+                        return;
+                    }
+                    
+                    // 如果正在编辑模式，不启动拖动
+                    if (placeholderBox.classList.contains('editing')) return;
+                    
+                    console.log('开始拖动占位符:', pos.field_name); // 调试信息
+                    
+                    // 记录鼠标按下位置
+                    mouseDownX = e.clientX;
+                    mouseDownY = e.clientY;
+                    
+                    isDragging = false;
+                    hasDragged = false;
+                    
+                    // 记录初始位置
+                    dragStartX = e.clientX;
+                    dragStartY = e.clientY;
+                    dragStartLeft = parseFloat(placeholderBox.style.left) || 0;
+                    dragStartTop = parseFloat(placeholderBox.style.top) || 0;
+                    
+                    // 添加全局事件监听器
+                    document.addEventListener('mousemove', handleMouseMove, { passive: false });
+                    document.addEventListener('mouseup', handleMouseUp, { passive: false });
+                    
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+                
+                // 点击占位符框可以编辑坐标（仅在非拖动时）
+                placeholderBox.addEventListener('click', function(e) {
+                    if (e.target.classList.contains('delete-btn')) return;
+                    // 如果刚刚拖动过，不触发编辑模式
+                    if (hasDragged) {
+                        return;
+                    }
+                    toggleEditMode(placeholderBox, posIndex);
+                });
+                
+                overlay.appendChild(placeholderBox);
+            });
+        }
+        
+        // 切换编辑模式
+        function toggleEditMode(box, posIndex) {
+            const pos = placeholderPositions[posIndex];
+            if (!pos) return;
+            
+            if (box.classList.contains('editing')) {
+                // 退出编辑模式
+                box.classList.remove('editing');
+                const field = availableFields.find(f => f.name === pos.field_name);
+                const isConstant = pos.is_constant || false;
+                const isExtra = pos.is_extra || false;
+                const isSignature = pos.is_signature || false;
+                let displayName = '';
+                if (isConstant) {
+                    displayName = `常量: ${pos.constant_value || pos.field_name}`;
+                } else if (isExtra) {
+                    if (isSignature) {
+                        displayName = `签名: ${pos.field_name}`;
+                    } else {
+                        displayName = `额外: ${pos.field_name}`;
+                    }
+                } else {
+                    displayName = field ? field.label : pos.field_name;
+                }
+                
+                // 恢复签名类型的样式类
+                if (isSignature) {
+                    box.classList.add('signature-placeholder');
+                }
+                box.innerHTML = `
+                    <div class="field-label">${displayName}</div>
+                    <button class="delete-btn" onclick="removePosition(${posIndex})" title="删除">×</button>
+                `;
+                box.addEventListener('click', function(e) {
+                    if (e.target.classList.contains('delete-btn')) return;
+                    toggleEditMode(box, posIndex);
+                });
+            } else {
+                // 进入编辑模式
+                box.classList.add('editing');
+                const field = availableFields.find(f => f.name === pos.field_name);
+                const isConstant = pos.is_constant || false;
+                const isExtra = pos.is_extra || false;
+                let displayName = '';
+                if (isConstant) {
+                    displayName = `常量: ${pos.constant_value || pos.field_name}`;
+                } else if (isExtra) {
+                    displayName = `额外: ${pos.field_name}`;
+                } else {
+                    displayName = field ? field.label : pos.field_name;
+                }
+                const posX = (pos.x != null) ? pos.x.toFixed(1) : '0.0';
+                const posY = (pos.y != null) ? pos.y.toFixed(1) : '0.0';
+                const fontSize = (pos.font_size != null) ? pos.font_size : globalFontSize;
+                box.innerHTML = `
+                    <div class="field-label">${displayName}</div>
+                    <button class="delete-btn" onclick="removePosition(${posIndex})" title="删除">×</button>
+                    <div class="coord-inputs">
+                        <label>X:</label>
+                        <input type="number" step="0.1" value="${posX}" 
+                               onchange="updatePositionFromInput(${posIndex}, 'x', this.value)"
+                               onblur="updatePositionFromInput(${posIndex}, 'x', this.value)">
+                        <label>Y:</label>
+                        <input type="number" step="0.1" value="${posY}" 
+                               onchange="updatePositionFromInput(${posIndex}, 'y', this.value)"
+                               onblur="updatePositionFromInput(${posIndex}, 'y', this.value)">
+                        <label>字体:</label>
+                        <input type="number" step="1" min="8" max="72" value="${fontSize}" 
+                               style="width: 50px;"
+                               onchange="updatePositionFromInput(${posIndex}, 'font_size', this.value)"
+                               onblur="updatePositionFromInput(${posIndex}, 'font_size', this.value)"
+                               title="字体大小(px)">
+                    </div>
+                `;
+            }
+        }
+        
+        // 从输入框更新位置
+        function updatePositionFromInput(posIndex, coord, value) {
+            const pos = placeholderPositions[posIndex];
+            if (!pos) return;
+            
+            const numValue = parseFloat(value);
+            if (isNaN(numValue)) return;
+            
+            if (coord === 'x') {
+                pos.x = numValue;
+            } else if (coord === 'y') {
+                pos.y = numValue;
+            } else if (coord === 'font_size') {
+                // 确保字体大小在合理范围内
+                pos.font_size = Math.max(8, Math.min(72, Math.round(numValue)));
+            }
+            
+            // 重新渲染标记以更新位置
+            renderMarkers();
+            renderPositions();
+        }
+        
+        // 拖动占位符框时更新位置
+        function updatePositionFromDrag(posIndex, screenX, screenY) {
+            const pos = placeholderPositions[posIndex];
+            if (!pos) return;
+            
+            // 重新计算比例
+            calculatePDFScale();
+            
+            // 转换为PDF坐标
+            const pdfCoords = screenToPdf(screenX, screenY);
+            pos.x = pdfCoords.x;
+            pos.y = pdfCoords.y;
+            
+            // 重新渲染
+            renderMarkers();
+            renderPositions();
+        }
+        
+        // 渲染占位符列表
+        function renderPositions() {
+            const list = document.getElementById('positions-list');
+            
+            if (placeholderPositions.length === 0) {
+                list.innerHTML = '<p class="text-muted text-center">暂无占位符</p>';
+                return;
+            }
+            
+            // 按页码分组
+            const positionsByPage = {};
+            placeholderPositions.forEach((pos, idx) => {
+                const page = pos.page || 0;
+                if (!positionsByPage[page]) {
+                    positionsByPage[page] = [];
+                }
+                positionsByPage[page].push({...pos, index: idx});
+            });
+            
+            let html = '';
+            Object.keys(positionsByPage).sort((a, b) => parseInt(a) - parseInt(b)).forEach(page => {
+                html += `<div class="mb-2"><strong>第 ${parseInt(page) + 1} 页：</strong></div>`;
+                positionsByPage[page].forEach(pos => {
+                    const field = availableFields.find(f => f.name === pos.field_name);
+                    const isConstant = pos.is_constant || false;
+                    const displayName = isConstant ? `常量: ${pos.constant_value || pos.field_name}` : (field ? field.label : pos.field_name);
+                    const posX = (pos.x != null) ? pos.x.toFixed(1) : '0.0';
+                    const posY = (pos.y != null) ? pos.y.toFixed(1) : '0.0';
+                    const fontSize = (pos.font_size != null) ? pos.font_size : globalFontSize;
+                    html += `
+                        <div class="position-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div style="flex: 1;">
+                                    <strong>${displayName}</strong>
+                                    <small class="text-muted d-block">位置: (${posX}, ${posY})</small>
+                                    <small class="text-muted d-block">字体: <span id="font-size-display-${pos.index}">${fontSize}</span>px</small>
+                                    ${isConstant ? '<small class="text-info d-block">常量值</small>' : ''}
+                                </div>
+                                <div class="ms-2">
+                                    <input type="number" step="1" min="8" max="72" value="${fontSize}" 
+                                           style="width: 60px; font-size: 12px; padding: 2px 4px;"
+                                           onchange="updateFontSizeInList(${pos.index}, this.value)"
+                                           onblur="updateFontSizeInList(${pos.index}, this.value)"
+                                           title="字体大小(px)">
+                                    <button class="btn btn-sm btn-outline-danger ms-1" onclick="removePosition(${pos.index})" title="删除">×</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+            
+            list.innerHTML = html;
+        }
+        
+        // 删除占位符
+        function removePosition(index) {
+            if (confirm('确定要删除这个占位符吗？')) {
+                placeholderPositions.splice(index, 1);
+                renderPositions();
+                renderMarkers();
+            }
+        }
+        
+        // 清除所有占位符
+        function clearAllPlaceholders() {
+            if (confirm('确定要清除所有占位符吗？')) {
+                placeholderPositions = [];
+                renderPositions();
+                renderMarkers();
+            }
+        }
+        
+        // 更新全局字体大小显示
+        function updateGlobalFontSize(value) {
+            globalFontSize = parseInt(value);
+            document.getElementById('global-font-size-value').textContent = globalFontSize;
+        }
+        
+        // 应用全局字体大小到所有占位符
+        function applyGlobalFontSize() {
+            if (placeholderPositions.length === 0) {
+                alert('没有占位符可应用');
+                return;
+            }
+            
+            if (confirm(`确定要将所有占位符的字体大小设置为 ${globalFontSize}px 吗？`)) {
+                placeholderPositions.forEach(pos => {
+                    pos.font_size = globalFontSize;
+                });
+                renderPositions();
+                renderMarkers();
+                alert(`已将所有 ${placeholderPositions.length} 个占位符的字体大小设置为 ${globalFontSize}px`);
+            }
+        }
+        
+        // 在列表中更新字体大小
+        function updateFontSizeInList(posIndex, value) {
+            const pos = placeholderPositions[posIndex];
+            if (!pos) return;
+            
+            const numValue = parseInt(value);
+            if (isNaN(numValue)) return;
+            
+            // 确保字体大小在合理范围内
+            pos.font_size = Math.max(8, Math.min(72, numValue));
+            
+            // 更新显示
+            const displayElement = document.getElementById(`font-size-display-${posIndex}`);
+            if (displayElement) {
+                displayElement.textContent = pos.font_size;
+            }
+            
+            // 如果该占位符正在编辑模式，更新编辑框中的值
+            const overlay = document.getElementById('overlay');
+            if (overlay) {
+                const editingBox = overlay.querySelector(`[data-position-index="${posIndex}"].editing`);
+                if (editingBox) {
+                    const fontInput = editingBox.querySelector('input[type="number"][title="字体大小(px)"]');
+                    if (fontInput) {
+                        fontInput.value = pos.font_size;
+                    }
+                }
+            }
+            
+            // 如果处于预览模式，重新渲染预览
+            if (previewMode) {
+                renderFinalPreview();
+            }
+        }
+        
+        // 保存占位符位置
+        async function savePlaceholders() {
+            try {
+                const response = await fetch(`${API_BASE}/templates/${templateId}/placeholder-positions`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(placeholderPositions)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    alert('保存成功！已保存 ' + placeholderPositions.length + ' 个占位符');
+                    // 可以选择返回上一页
+                    // window.location.href = '/#page-templates';
+                } else {
+                    const error = await response.json();
+                    alert('保存失败：' + (error.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('保存失败:', error);
+                alert('保存失败：' + error.message);
+            }
+        }
+        
+        // 窗口大小改变或缩放改变时重新计算
+        let resizeTimer = null;
+        let resizeObserver = null;
+        
+        function handleResize() {
+            // 防抖处理，避免频繁重新计算
+            if (resizeTimer) {
+                clearTimeout(resizeTimer);
+            }
+            resizeTimer = setTimeout(() => {
+                calculatePDFScale();
+                // 更新overlay尺寸
+                const canvas = document.getElementById('pdf-canvas');
+                const overlay = document.getElementById('overlay');
+                if (canvas && overlay) {
+                    const canvasRect = canvas.getBoundingClientRect();
+                    overlay.style.height = canvasRect.height + 'px';
+                    overlay.style.width = canvasRect.width + 'px';
+                }
+                renderMarkers();
+            }, 100);
+        }
+        
+        // 初始化resize监听器
+        function initResizeObserver() {
+            // 如果已经初始化，先清理
+            if (resizeObserver) {
+                resizeObserver.disconnect();
+            }
+            
+            // 监听窗口大小改变
+            window.addEventListener('resize', handleResize);
+            
+            // 监听浏览器缩放（使用ResizeObserver监听canvas尺寸变化）
+            const canvas = document.getElementById('pdf-canvas');
+            if (canvas && window.ResizeObserver) {
+                resizeObserver = new ResizeObserver(entries => {
+                    handleResize();
+                });
+                resizeObserver.observe(canvas);
+            }
+        }
+        
+        // 渲染最终效果预览
+        let previewMode = false;
+        let originalCanvasImage = null;
+        
+        async function renderFinalPreview() {
+            const canvas = document.getElementById('pdf-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            if (!canvas || !ctx) {
+                alert('无法获取canvas，请先加载PDF');
+                return;
+            }
+            
+            if (!previewMode) {
+                // 进入预览模式：保存原始canvas内容，然后绘制文本
+                originalCanvasImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // 重新计算比例
+                calculatePDFScale();
+                
+                // 获取当前页的占位符
+                const currentPagePositions = placeholderPositions.filter(p => p.page === currentPage);
+                
+                // 从API获取真实教师数据作为示例
+                let previewData = {};
+                try {
+                    const teachersRes = await fetch(`${API_BASE}/teachers/`);
+                    if (teachersRes.ok) {
+                        const teachers = await teachersRes.json();
+                        if (teachers && teachers.length > 0) {
+                            // 随机选择一个教师作为示例
+                            const randomTeacher = teachers[Math.floor(Math.random() * teachers.length)];
+                            // 将教师数据转换为预览数据（支持字段名和标签名）
+                            previewData = {
+                                // 使用字段名作为key
+                                'name': randomTeacher.name || '',
+                                'sex': randomTeacher.sex || '',
+                                'department': randomTeacher.department || '',
+                                'position': randomTeacher.position || '',
+                                'phone': randomTeacher.phone || '',
+                                'email': randomTeacher.email || '',
+                                'id_number': randomTeacher.id_number || '',
+                                'title': randomTeacher.title || '',
+                                // 使用标签名作为key（兼容性）
+                                '姓名': randomTeacher.name || '',
+                                '性别': randomTeacher.sex || '',
+                                '部门': randomTeacher.department || '',
+                                '职位': randomTeacher.position || '',
+                                '手机号': randomTeacher.phone || '',
+                                '邮箱': randomTeacher.email || '',
+                                '身份证号': randomTeacher.id_number || '',
+                                '职称': randomTeacher.title || ''
+                            };
+                            
+                            // 添加扩展数据（如果有）
+                            if (randomTeacher.extra_data && typeof randomTeacher.extra_data === 'object') {
+                                Object.keys(randomTeacher.extra_data).forEach(key => {
+                                    previewData[key] = randomTeacher.extra_data[key];
+                                });
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn('获取教师数据失败，使用默认示例数据:', error);
+                    // 如果获取失败，使用默认示例数据
+                    previewData = {
+                        '姓名': '张三',
+                        '性别': '男',
+                        '部门': '教务处',
+                        '职位': '教师',
+                        '手机号': '13800138000',
+                        '邮箱': 'zhangsan@example.com'
+                    };
+                }
+                
+                // 设置字体样式
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'top'; // 文本基线在顶部
+                
+                // 在canvas上绘制文本
+                currentPagePositions.forEach(pos => {
+                    // 转换为屏幕坐标
+                    const screenCoords = pdfToScreen(pos.x, pos.y);
+                    
+                    // 获取要显示的文本
+                    let text = '';
+                    if (pos.is_constant && pos.constant_value) {
+                        text = pos.constant_value;
+                    } else if (pos.is_extra) {
+                        text = `[${pos.field_name}]`; // 额外占位符显示为字段名
+                    } else {
+                        // 查找字段标签
+                        const field = availableFields.find(f => f.name === pos.field_name);
+                        const fieldLabel = field ? field.label : pos.field_name;
+                        // 使用真实教师数据或显示字段名
+                        // 优先使用字段名，然后使用标签名，最后使用字段名作为fallback
+                        text = previewData[pos.field_name] || previewData[fieldLabel] || fieldLabel || pos.field_name;
+                    }
+                    
+                    // 设置字体大小
+                    const fontSize = pos.font_size || 12;
+                    // 尝试使用中文字体，如果系统没有则使用Arial
+                    ctx.font = `${fontSize}px "Microsoft YaHei", "SimHei", "SimSun", Arial, sans-serif`;
+                    ctx.fillStyle = '#000000';
+                    ctx.textBaseline = 'alphabetic'; // 使用字母基线（与PDF文本基线对齐）
+                    
+                    // 绘制文本
+                    // PDF坐标y是文本基线的位置，canvas的fillText使用alphabetic基线
+                    // screenCoords.y已经是转换后的屏幕坐标（Y轴已翻转）
+                    ctx.fillText(text, screenCoords.x, screenCoords.y);
+                });
+                
+                previewMode = true;
+                document.getElementById('render-preview-btn').innerHTML = '<i class="bi bi-eye-slash"></i> 取消预览';
+                document.getElementById('render-preview-btn').classList.remove('btn-primary');
+                document.getElementById('render-preview-btn').classList.add('btn-secondary');
+            } else {
+                // 退出预览模式：恢复原始canvas内容
+                if (originalCanvasImage) {
+                    ctx.putImageData(originalCanvasImage, 0, 0);
+                    originalCanvasImage = null;
+                }
+                
+                previewMode = false;
+                document.getElementById('render-preview-btn').innerHTML = '<i class="bi bi-eye"></i> 渲染最终效果';
+                document.getElementById('render-preview-btn').classList.remove('btn-secondary');
+                document.getElementById('render-preview-btn').classList.add('btn-primary');
+            }
+        }
+        
+        // 页面加载时初始化
+        loadData();
+    </script>
+</body>
+</html>
+

@@ -14,19 +14,32 @@
 
 ## 启动方式
 
-在项目根目录执行：
+### 仅主站（审批 / 门户）
 
 ```bash
 python server.py
 ```
 
-默认端口：`8000`
+端口由环境变量 `PORT` 控制，默认 `8000`。
+
+### 主站 + 原版 QuickVote + 原版 TeacherDataSystem
+
+民主测评（二维码、原模板）与教师数据系统（PDF 模板、任务、教师库）来自备份项目，需**单独进程**运行，与主站合并见 `vendor/README.md`。
+
+```bash
+python run_stack.py
+```
+
+或使用 `start_stack.bat`。默认端口：主站 `8000`、QuickVote `5005`、TeacherDataSystem `8001`（可在 `.env` 修改）。
+
+门户与管理中心通过 `/go/quickvote`、`/go/teacher-data-system` 跳转；请在 `.env` 设置 `QUICKVOTE_PUBLIC_URL`、`TEACHERDATA_PUBLIC_URL` 为实际访问地址（公网或反代后的 URL），以便 QuickVote 生成二维码正确。
 
 常用入口：
 
-- 管理中心：`http://127.0.0.1:8000/admin`
-- 门户首页：`http://127.0.0.1:8000/portal`
-- 教师入口：`http://127.0.0.1:8000/teacher`
+- 门户首页：`http://127.0.0.1:8000/home.html`（或根路径静态入口）
+- 管理中心：`http://127.0.0.1:8000/index.html`
+- 原版 QuickVote：`http://127.0.0.1:5005/`（未改端口时）
+- 原版教师数据：`http://127.0.0.1:8001/query`（未改端口时）
 
 ## 静态目录规则
 

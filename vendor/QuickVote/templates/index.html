@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .index-container {
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+        text-align: center;
+    }
+    
+    .index-header {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--primary-blue);
+        margin-bottom: 1rem;
+    }
+    
+    .index-lead {
+        font-size: 1.125rem;
+        color: var(--text-secondary);
+        margin-bottom: 2rem;
+    }
+    
+    .login-card {
+        background: var(--bg-white);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+    }
+    
+    .login-card:hover {
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    }
+    
+    .login-header {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--primary-blue);
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 2px solid var(--border-color);
+    }
+    
+    .index-container .btn-primary {
+        background-color: var(--primary-blue);
+        border: none;
+    }
+    
+    .index-container .btn-primary:hover {
+        background-color: var(--primary-blue-dark);
+    }
+    
+    @media (max-width: 768px) {
+        .index-container {
+            padding: 1rem 0.75rem;
+        }
+    }
+</style>
+
+<div class="index-container main-container">
+    <h1 class="index-header">欢迎使用 QuickVote 民主测评系统</h1>
+    <p class="index-lead">请使用管理员提供的二维码进行登录和投票</p>
+    
+    <div class="login-card">
+        <div class="login-header">管理员登录</div>
+        <div>
+            <form action="{{ url_for('admin_login') }}" method="POST">
+                <div class="mb-3">
+                    <label for="username" class="form-label">用户名</label>
+                    <input type="text" class="form-control" id="username" name="username" required autocomplete="username">
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">密码</label>
+                    <input type="password" class="form-control" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary">登录</button>
+            </form>
+            <p class="text-muted mt-2 mb-0" style="font-size: 0.875rem;">默认账号：admin / admin123</p>
+        </div>
+    </div>
+    
+    <div class="alert alert-info mt-3" style="border-left: 3px solid var(--info-color);">
+        普通用户请扫描管理员提供的二维码进行登录
+    </div>
+</div>
+{% endblock %} 

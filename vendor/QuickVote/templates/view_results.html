@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .results-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+    
+    .page-header h2 {
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: #1a202c;
+        margin: 0;
+    }
+    
+    .results-section {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    
+    .section-header {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 2px solid #edf2f7;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .stat-card {
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+        text-align: center;
+    }
+    
+    .stat-value {
+        font-size: 2rem;
+        font-weight: 600;
+        color: #4299e1;
+        margin-bottom: 0.5rem;
+    }
+    
+    .stat-label {
+        font-size: 0.875rem;
+        color: #718096;
+    }
+    
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    
+    .data-table th {
+        background: #f7fafc;
+        font-weight: 600;
+        color: #2d3748;
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .data-table tbody tr:hover {
+        background: #f7fafc;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+    }
+    
+    @media (max-width: 768px) {
+        .results-container {
+            padding: 1rem 0.75rem;
+        }
+        
+        .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        
+        .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+        
+        .data-table {
+            font-size: 0.875rem;
+        }
+        
+        .data-table th,
+        .data-table td {
+            padding: 0.5rem;
+        }
+        
+        .action-buttons {
+            flex-direction: column;
+        }
+    }
+</style>
+
+<div class="results-container">
+    <div class="page-header">
+        <h2>查看结果：{{ survey.name }}</h2>
+        <a href="{{ url_for('admin') }}" class="btn btn-secondary">返回问卷列表</a>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <!-- 统计数据 -->
+    <div class="results-section">
+        <div class="section-header">
+            <span>统计数据</span>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ total_votes }}</div>
+                <div class="stat-label">总投票数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ unique_users }}</div>
+                <div class="stat-label">参与用户数</div>
+            </div>
+            {% if survey.type == 'table' %}
+            <div class="stat-card">
+                <div class="stat-value">{{ unique_respondents }}</div>
+                <div class="stat-label">被评价人数</div>
+            </div>
+            {% endif %}
+            <div class="stat-card">
+                <div class="stat-value">{{ total_questions }}</div>
+                <div class="stat-label">问题数量</div>
+            </div>
+            {% if total_subjective_answers > 0 %}
+            <div class="stat-card">
+                <div class="stat-value">{{ total_subjective_answers }}</div>
+                <div class="stat-label">主观题回答</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- 投票数据 -->
+    <div class="results-section">
+        <div class="section-header">
+            <span>投票数据</span>
+            <div>
+                <a href="{{ url_for('download_results', survey_id=survey.id) }}" class="btn btn-success btn-sm">下载 Excel</a>
+            </div>
+        </div>
+        {% if votes_data %}
+        <div style="overflow-x: auto;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>用户</th>
+                        <th>问题</th>
+                        {% if survey.type == 'table' %}
+                        <th>人名</th>
+                        {% endif %}
+                        <th>选项</th>
+                        <th>时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vote in votes_data %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ vote.user }}</td>
+                        <td>{{ vote.question }}</td>
+                        {% if survey.type == 'table' %}
+                        <td>{{ vote.respondent or '-' }}</td>
+                        {% endif %}
+                        <td>{{ vote.option }}</td>
+                        <td>{{ vote.time.strftime('%Y-%m-%d %H:%M:%S') if vote.time else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">暂无投票数据</p>
+        {% endif %}
+    </div>
+    
+    <!-- 主观题回答 -->
+    {% if subjective_answers %}
+    <div class="results-section">
+        <div class="section-header">
+            <span>主观题回答</span>
+        </div>
+        <div style="overflow-x: auto;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>用户</th>
+                        <th>回答内容</th>
+                        <th>时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for answer in subjective_answers %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ answer.user }}</td>
+                        <td>{{ answer.content or '-' }}</td>
+                        <td>{{ answer.time.strftime('%Y-%m-%d %H:%M:%S') if answer.time else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- 操作按钮 -->
+    <div class="results-section">
+        <div class="action-buttons">
+            <a href="{{ url_for('download_results', survey_id=survey.id) }}" class="btn btn-success">
+                下载 Excel 文件
+            </a>
+            <form action="{{ url_for('delete_results', survey_id=survey.id) }}" method="post" 
+                  onsubmit="return confirm('您确定要删除问卷 \"{{ survey.name }}\" 的所有投票数据吗？此操作不可撤销！');"
+                  style="display: inline;">
+                <button type="submit" class="btn btn-danger">
+                    删除所有投票数据
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

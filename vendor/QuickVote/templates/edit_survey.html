@@ -1,0 +1,1360 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* ============================================
+       编辑问卷页面样式优化
+       保持与整体风格一致
+    ============================================ */
+    
+    .edit-page-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+    
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #edf2f7;
+    }
+    
+    .page-header h2 {
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: #1a202c;
+        margin: 0;
+    }
+    
+    .btn-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1.5rem;
+        background: #4299e1;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 500;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(66, 153, 225, 0.2);
+    }
+    
+    .btn-back:hover {
+        background: #3182ce;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(66, 153, 225, 0.3);
+    }
+    
+    .btn-back:active {
+        transform: translateY(0);
+    }
+    
+    .back-icon {
+        font-size: 1.25rem;
+        font-weight: bold;
+        transition: transform 0.3s ease;
+    }
+    
+    .btn-back:hover .back-icon {
+        transform: translateX(-3px);
+    }
+    
+    .section-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        overflow: hidden;
+        transition: all 0.3s ease;
+    }
+    
+    .section-card:hover {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    
+    .section-header {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #2d3748;
+        padding: 1.25rem 1.5rem;
+        margin: 0;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #f7fafc;
+        border-bottom: 1px solid #e2e8f0;
+        user-select: none;
+        transition: background 0.2s ease;
+    }
+    
+    .section-header:hover {
+        background: #edf2f7;
+    }
+    
+    .section-header-title {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    .section-icon {
+        font-size: 1.25rem;
+        color: #4299e1;
+    }
+    
+    .toggle-icon {
+        font-size: 1.25rem;
+        color: #718096;
+        transition: transform 0.3s ease;
+    }
+    
+    .toggle-icon.expanded {
+        transform: rotate(180deg);
+    }
+    
+    .section-content {
+        padding: 1.5rem;
+        display: none;
+    }
+    
+    .section-content.show {
+        display: block;
+    }
+    
+    .section-card.always-visible .section-content {
+        display: block;
+    }
+    
+    .section-card.always-visible .section-header {
+        cursor: default;
+        background: #ffffff;
+    }
+    
+    .section-card.always-visible .toggle-icon {
+        display: none;
+    }
+    
+    .section-header .btn {
+        margin-left: auto;
+    }
+    
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1rem;
+    }
+    
+    .form-grid-full {
+        grid-column: 1 / -1;
+    }
+    
+    .form-label {
+        margin-bottom: 0.4rem;
+        font-weight: 500;
+    }
+    
+    .mb-3 {
+        margin-bottom: 0.75rem !important;
+    }
+    
+    /* 折叠表单样式 */
+    .collapse-form {
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+        transition: all 0.3s ease;
+        overflow: hidden;
+    }
+    
+    .collapse-form.hidden {
+        display: none;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    
+    /* 问题列表样式优化 */
+    .question-list-container {
+        margin-top: 1.5rem;
+    }
+    
+    .batch-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: #f7fafc;
+        border-radius: 8px;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    
+    .batch-actions-left {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .batch-actions-right {
+        color: #718096;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+    
+    .list-group {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    .list-group-item {
+        border: 1px solid #e2e8f0;
+        border-bottom: none;
+        padding: 1rem;
+        transition: all 0.2s ease;
+    }
+    
+    .list-group-item:last-child {
+        border-bottom: 1px solid #e2e8f0;
+    }
+    
+    .question-item-clickable {
+        cursor: pointer;
+        display: flex;
+        align-items: start;
+        gap: 0.75rem;
+    }
+    
+    .question-item-clickable:hover {
+        background-color: #f7fafc !important;
+        border-color: #cbd5e0;
+    }
+    
+    .question-content {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .question-content h6 {
+        margin: 0 0 0.5rem 0;
+        font-size: 1rem;
+        font-weight: 500;
+        color: #2d3748;
+        word-wrap: break-word;
+    }
+    
+    .question-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    .question-info {
+        color: #718096;
+        font-size: 0.875rem;
+    }
+    
+    .question-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .question-actions .btn-group {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    /* 自定义选项样式 */
+    .custom-option-item {
+        position: relative;
+    }
+    
+    .custom-option-item .input-group {
+        display: flex;
+    }
+    
+    .custom-option-item .btn-outline-danger {
+        padding: 0.375rem 0.75rem;
+        border-color: #e53e3e;
+        color: #e53e3e;
+        transition: all 0.2s ease;
+    }
+    
+    .custom-option-item .btn-outline-danger:hover:not(:disabled) {
+        background: #e53e3e;
+        color: white;
+        border-color: #e53e3e;
+    }
+    
+    .custom-option-item .btn-outline-danger:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+    
+    /* 空状态样式 */
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: #718096;
+    }
+    
+    .empty-state p {
+        margin: 0;
+        font-size: 0.9375rem;
+    }
+    
+    /* 表单按钮组 */
+    .form-actions {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid #edf2f7;
+    }
+    
+    /* 人名列表样式 */
+    .respondent-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #e2e8f0;
+        transition: background-color 0.2s ease;
+    }
+    
+    .respondent-item:last-child {
+        border-bottom: none;
+    }
+    
+    .respondent-item:hover {
+        background-color: #f7fafc;
+    }
+    
+    .respondent-name {
+        font-weight: 500;
+        color: #2d3748;
+    }
+    
+    /* 选项限制设置网格 */
+    .limit-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+    
+    /* 拖拽相关样式 */
+    .drag-handle {
+        cursor: grab;
+        color: #a0aec0;
+        font-size: 1.25rem;
+        padding: 0.5rem;
+        margin-right: 0.5rem;
+        transition: color 0.2s ease;
+        user-select: none;
+        display: inline-flex;
+        align-items: center;
+    }
+    
+    .drag-handle:hover {
+        color: #4299e1;
+    }
+    
+    .drag-handle:active {
+        cursor: grabbing;
+    }
+    
+    .drag-handle::after {
+        content: '';
+        position: absolute;
+        left: -5px;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: transparent;
+        transition: background 0.2s ease;
+    }
+    
+    .drag-handle:hover::after {
+        background: #4299e1;
+    }
+    
+    .list-group-item.dragging {
+        opacity: 0.4;
+        background: #e2e8f0 !important;
+        border: 2px dashed #cbd5e0 !important;
+        transform: scale(0.98);
+    }
+    
+    .list-group-item.drag-over {
+        border-top: 4px solid #4299e1 !important;
+        background: #ebf8ff !important;
+    }
+    
+    .question-item-clickable {
+        transition: all 0.2s ease;
+        position: relative;
+    }
+    
+    /* 占位符样式 */
+    .drag-placeholder {
+        background: linear-gradient(135deg, #f7fafc 25%, transparent 25%, transparent 50%, #f7fafc 50%, #f7fafc 75%, transparent 75%, transparent) !important;
+        background-size: 20px 20px !important;
+        border: 3px dashed #4299e1 !important;
+        position: relative;
+    }
+    
+    .drag-placeholder::before {
+        content: '⬇ 松开鼠标放置到这里';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #4299e1;
+        font-weight: 600;
+        font-size: 1rem;
+        white-space: nowrap;
+        pointer-events: none;
+    }
+    
+    /* 拖拽提示 */
+    .drag-hint {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: #4299e1;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(66, 153, 225, 0.3);
+        display: none;
+        animation: fadeIn 0.3s ease;
+    }
+    
+    .drag-hint.show {
+        display: block;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+        .edit-page-container {
+            padding: 1rem 0.75rem;
+        }
+        
+        .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        
+        .btn-back {
+            width: 100%;
+            justify-content: center;
+        }
+        
+        .form-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .batch-actions {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        
+        .batch-actions-left {
+            width: 100%;
+        }
+        
+        .batch-actions-right {
+            text-align: center;
+        }
+        
+        .question-meta {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .question-actions {
+            width: 100%;
+            justify-content: flex-end;
+        }
+        
+        .limit-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<div class="edit-page-container">
+    <div class="page-header">
+        <h2>编辑问卷：{{ survey.name }}</h2>
+        <a href="{{ url_for('admin') }}" class="btn btn-back">
+            <span class="back-icon">←</span>
+            返回管理页面
+        </a>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <!-- 基本信息编辑 -->
+    <div class="section-card">
+        <div class="section-header" onclick="toggleSectionCard(this)">
+            <div class="section-header-title">
+                <span class="section-icon">📝</span>
+                <span>基本信息</span>
+            </div>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="section-content">
+            <form action="{{ url_for('update_survey_info', survey_id=survey.id) }}" method="post">
+                <div class="form-grid">
+                <div class="form-grid-full">
+                    <label for="survey_name" class="form-label">问卷名称 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="survey_name" name="survey_name" 
+                           value="{{ survey.name }}" required>
+                </div>
+                
+                <div class="form-grid-full">
+                    <label for="survey_introduction" class="form-label">问卷简介</label>
+                    <textarea class="form-control" id="survey_introduction" name="survey_introduction" 
+                              rows="2">{{ survey.introduction or '' }}</textarea>
+                    <small class="text-muted">非必填项</small>
+                </div>
+                
+                <div class="form-grid-full">
+                    <label for="subjective_question_prompt" class="form-label">主观题说明文字</label>
+                    <textarea class="form-control" id="subjective_question_prompt" name="subjective_question_prompt" 
+                              rows="2">{{ survey.subjective_question_prompt or '' }}</textarea>
+                    <small class="text-muted">非必填项</small>
+                </div>
+                
+                {% if survey.type == 'table' %}
+                <div>
+                    <label for="table_option_count" class="form-label">选项数量</label>
+                    <select class="form-select" id="table_option_count" name="table_option_count" required>
+                        <option value="2" {% if survey.table_option_count==2 %}selected{% endif %}>2项 (A/B)</option>
+                        <option value="3" {% if survey.table_option_count==3 %}selected{% endif %}>3项 (A/B/C)</option>
+                        <option value="4" {% if survey.table_option_count==4 %}selected{% endif %}>4项 (A/B/C/D)</option>
+                        <option value="5" {% if survey.table_option_count==5 %}selected{% endif %}>5项 (A/B/C/D/E)</option>
+                    </select>
+                    <small class="text-muted">修改选项数量会影响所有问题</small>
+                </div>
+                {% endif %}
+                
+                <div>
+                    <label class="form-label">功能设置</label>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" name="enable_quick_fill" id="enable_quick_fill" 
+                               {% if survey.enable_quick_fill %}checked{% endif %}>
+                        <label class="form-check-label" for="enable_quick_fill">
+                            启用快填功能
+                        </label>
+                        <small class="d-block text-muted mt-1" style="font-size: 0.8125rem;">
+                            按住快填按钮自动选择第一个选项
+                        </small>
+                    </div>
+                </div>
+                
+                <div class="form-grid-full">
+                    <button type="submit" class="btn btn-primary">保存基本信息</button>
+                </div>
+            </div>
+            </form>
+        </div>
+    </div>
+
+    {% if survey.type == 'single_choice' %}
+        <!-- 批量添加问题 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">📝</span>
+                    <span>批量添加标准问题</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('edit_survey', survey_id=survey.id) }}" method="post">
+                    <input type="hidden" name="action" value="import_list">
+                    <div class="mb-3">
+                        <label for="question_list" class="form-label">问题列表（每行一个问题）</label>
+                        <textarea class="form-control" id="question_list" name="question_list" 
+                                  rows="10" placeholder="每行输入一个问题，例如：&#10;问题1&#10;问题2&#10;问题3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="option_count_batch" class="form-label">批量问题选项数量</label>
+                        <select class="form-select" id="option_count_batch" name="option_count_batch">
+                            <option value="2">2个选项 (A/B)</option>
+                            <option value="3">3个选项 (A/B/C)</option>
+                            <option value="4" selected>4个选项 (A/B/C/D)</option>
+                            <option value="5">5个选项 (A/B/C/D/E)</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-success">批量添加</button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 添加自定义单选组件 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">🎨</span>
+                    <span>添加自定义单选组件</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('edit_survey', survey_id=survey.id) }}" method="post" id="custom_component_form">
+                    <input type="hidden" name="action" value="add_custom_component">
+                    <div class="mb-3">
+                        <label for="custom_question_content" class="form-label">题目内容</label>
+                        <input type="text" class="form-control" id="custom_question_content" name="custom_question_content" 
+                               placeholder="例如：填写人身份" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">选项列表</label>
+                        <div id="custom_options_container">
+                            <div class="custom-option-item mb-2">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="option_Z" placeholder="请输入选项内容，例如：党员" required>
+                                    <button type="button" class="btn btn-outline-danger" onclick="removeCustomOption(this)" disabled>
+                                        <span>✕</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="custom-option-item mb-2">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="option_Y" placeholder="请输入选项内容，例如：群众" required>
+                                    <button type="button" class="btn btn-outline-danger" onclick="removeCustomOption(this)">
+                                        <span>✕</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addCustomOption()">
+                            <span>＋</span> 添加选项
+                        </button>
+                    </div>
+                    <button type="submit" class="btn btn-primary">添加自定义组件</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 选项限制设置 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">⚙️</span>
+                    <span>设置选项限制</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('set_option_limits', survey_id=survey.id) }}" method="post">
+                    <div class="limit-grid">
+                        {% for option in 'ABCDE' %}
+                        <div>
+                            <label for="limit_{{ option }}" class="form-label">选项 {{ option }} 最大选择次数</label>
+                            <input type="number" class="form-control" id="limit_{{ option }}" 
+                                   name="limit_{{ option }}" min="0" 
+                                   value="{{ (survey.option_limits or {}).get(option, '') }}"
+                                   placeholder="不限制请留空">
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-3">保存限制设置</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 问题列表 -->
+        <div class="section-card always-visible">
+            <div class="section-header">
+                <div class="section-header-title">
+                    <span class="section-icon">📋</span>
+                    <span>纵轴问题列表</span>
+                </div>
+            </div>
+            <div class="section-content show">
+                <div class="alert alert-info mb-3" style="font-size: 0.9rem;">
+                    <strong>💡 拖拽排序提示：</strong>
+                    点击并按住问题左侧的 <strong>☰</strong> 图标，拖动到目标位置（会显示虚线框和提示文字），然后松开鼠标即可完成排序。
+                </div>
+                <div class="question-list-container">
+                    {% if questions %}
+                    <form id="batchDeleteForm" action="{{ url_for('batch_delete_questions') }}" method="post">
+                        <input type="hidden" name="survey_id" value="{{ survey.id }}">
+                        <div class="batch-actions">
+                            <div class="batch-actions-left">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleSelectAll()">全选/取消全选</button>
+                                <button type="submit" class="btn btn-sm btn-danger" 
+                                        onclick="return confirm('确定要删除选中的问题吗？此操作不可撤销！');">
+                                    批量删除选中
+                                </button>
+                            </div>
+                            <div class="batch-actions-right" id="selected-count">已选择 0 个问题</div>
+                        </div>
+                        <div class="list-group" id="question-list">
+                            {% for question in questions %}
+                            <div class="list-group-item question-item-clickable" 
+                                 data-question-id="{{ question.id }}"
+                                 onclick="toggleQuestionCheckbox(this, {{ question.id }}, event)">
+                                <input type="checkbox" class="form-check-input mt-2 question-checkbox" 
+                                       name="question_ids" value="{{ question.id }}" 
+                                       onchange="updateSelectedCount()"
+                                       onclick="event.stopPropagation()">
+                                <div class="question-content">
+                                    <h6>{{ question.content }}</h6>
+                                    {% if question.component_type == 'custom_single_choice' %}
+                                    <span class="badge bg-info mb-2">自定义单选组件</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary mb-2">标准问题</span>
+                                    {% endif %}
+                                    <div class="question-meta">
+                                        <span class="question-info">
+                                            {% if question.component_type == 'custom_single_choice' and question.custom_options %}
+                                                自定义选项: 
+                                                {% for key, value in question.custom_options.items() %}
+                                                    {{ key }}.{{ value }}{% if not loop.last %}，{% endif %}
+                                                {% endfor %}
+                                            {% else %}
+                                                选项数量: {{ question.option_count }}，选项: {{ 'ABCDE'[:question.option_count] }}
+                                            {% endif %}
+                                        </span>
+                                        <div class="question-actions" onclick="event.stopPropagation()">
+                                            <div class="btn-group btn-group-sm me-2">
+                                                {% if not loop.first %}
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                        onclick="moveQuestion({{ question.id }}, 'top', {{ survey.id }})" 
+                                                        title="置顶">⇈</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                        onclick="moveQuestion({{ question.id }}, 'up', {{ survey.id }})" 
+                                                        title="上移">↑</button>
+                                                {% endif %}
+                                                {% if not loop.last %}
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                        onclick="moveQuestion({{ question.id }}, 'down', {{ survey.id }})" 
+                                                        title="下移">↓</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                        onclick="moveQuestion({{ question.id }}, 'bottom', {{ survey.id }})" 
+                                                        title="置底">⇊</button>
+                                                {% endif %}
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-primary" 
+                                                    data-question-id="{{ question.id }}"
+                                                    data-question-content='{{ question.content|tojson }}'
+                                                    data-option-count="{{ question.option_count }}"
+                                                    onclick="editQuestion(this)">
+                                                编辑
+                                            </button>
+                                            <form action="{{ url_for('delete_question', question_id=question.id) }}" method="post" 
+                                                  onsubmit="return confirm('确定要删除这个问题吗？');" style="display:inline;">
+                                                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="empty-state">
+                        <p>暂无问题，请添加问题</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 编辑问题的表单 -->
+        <div class="section-card" id="editQuestionCard" style="display: none;">
+            <div class="section-header">编辑问题</div>
+            <form id="editQuestionForm" method="post">
+                <div class="mb-3">
+                    <label for="edit_question_content" class="form-label">问题内容</label>
+                    <textarea class="form-control" id="edit_question_content" name="content" rows="2" required></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="edit_option_count" class="form-label">选项数量</label>
+                    <select class="form-select" id="edit_option_count" name="option_count">
+                        <option value="2">2个选项 (A/B)</option>
+                        <option value="3">3个选项 (A/B/C)</option>
+                        <option value="4">4个选项 (A/B/C/D)</option>
+                        <option value="5">5个选项 (A/B/C/D/E)</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" onclick="cancelEditQuestion()">取消</button>
+                </div>
+            </form>
+        </div>
+
+    {% else %}
+        <!-- 添加横轴问题 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">➕</span>
+                    <span>添加横轴问题</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('edit_survey', survey_id=survey.id) }}" method="post">
+                    <input type="hidden" name="action" value="add_question">
+                    <div class="mb-3">
+                        <label for="table_content" class="form-label">问题内容（列标题）</label>
+                        <textarea class="form-control" id="table_content" name="content" rows="2" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">添加横轴问题</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 添加自定义单选组件 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">🎨</span>
+                    <span>添加自定义单选组件</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('edit_survey', survey_id=survey.id) }}" method="post" id="table_custom_component_form">
+                    <input type="hidden" name="action" value="add_custom_component">
+                    <div class="mb-3">
+                        <label for="table_custom_question_content" class="form-label">题目内容</label>
+                        <input type="text" class="form-control" id="table_custom_question_content" name="custom_question_content" 
+                               placeholder="例如：填写人身份" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">选项列表</label>
+                        <div id="table_custom_options_container">
+                            <div class="custom-option-item mb-2">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="option_Z" placeholder="请输入选项内容，例如：党员" required>
+                                    <button type="button" class="btn btn-outline-danger" onclick="removeTableCustomOption(this)" disabled>
+                                        <span>✕</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="custom-option-item mb-2">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="option_Y" placeholder="请输入选项内容，例如：群众" required>
+                                    <button type="button" class="btn btn-outline-danger" onclick="removeTableCustomOption(this)">
+                                        <span>✕</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addTableCustomOption()">
+                            <span>＋</span> 添加选项
+                        </button>
+                    </div>
+                    <button type="submit" class="btn btn-primary">添加自定义组件</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 选项限制设置 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">⚙️</span>
+                    <span>设置选项限制</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('set_option_limits', survey_id=survey.id) }}" method="post">
+                    <div class="limit-grid">
+                        {% for option in 'ABCDE'[:survey.table_option_count] %}
+                        <div>
+                            <label for="limit_{{ option }}_table" class="form-label">选项 {{ option }} 最大选择次数</label>
+                            <input type="number" class="form-control" id="limit_{{ option }}_table" 
+                                   name="limit_{{ option }}" min="0" 
+                                   value="{{ (survey.option_limits or {}).get(option, '') }}"
+                                   placeholder="不限制请留空">
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-3">保存限制设置</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 问题列表 -->
+        <div class="section-card always-visible">
+            <div class="section-header">
+                <div class="section-header-title">
+                    <span class="section-icon">📋</span>
+                    <span>纵轴问题列表</span>
+                </div>
+            </div>
+            <div class="section-content show">
+                <div class="alert alert-info mb-3" style="font-size: 0.9rem;">
+                    <strong>💡 排序提示：</strong>
+                    使用 <strong>⇈ ↑ ↓ ⇊</strong> 按钮可以调整问题顺序（置顶、上移、下移、置底）。
+                </div>
+                <div class="question-list-container">
+                    {% if questions %}
+                    <form id="batchDeleteTableForm" action="{{ url_for('batch_delete_questions') }}" method="post">
+                        <input type="hidden" name="survey_id" value="{{ survey.id }}">
+                        <div class="batch-actions">
+                            <div class="batch-actions-left">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleSelectAllTable()">全选/取消全选</button>
+                                <button type="submit" class="btn btn-sm btn-danger" 
+                                        onclick="return confirm('确定要删除选中的问题吗？此操作不可撤销！');">
+                                    批量删除选中
+                                </button>
+                            </div>
+                            <div class="batch-actions-right" id="selected-table-count">已选择 0 个问题</div>
+                        </div>
+                        <div class="list-group" id="table-question-list">
+                            {% for question in questions %}
+                            <div class="list-group-item question-item-clickable" 
+                                 data-question-id="{{ question.id }}"
+                                 onclick="toggleTableQuestionCheckbox(this, {{ question.id }}, event)">
+                                <input type="checkbox" class="form-check-input mt-2 table-question-checkbox" 
+                                       name="question_ids" value="{{ question.id }}" 
+                                       onchange="updateSelectedTableCount()"
+                                       onclick="event.stopPropagation()">
+                                <div class="question-content">
+                                    <h6>{{ question.content }}</h6>
+                                    {% if question.component_type == 'custom_single_choice' %}
+                                    <span class="badge bg-info mb-2">自定义单选组件</span>
+                                    <p class="mb-0 text-muted" style="font-size: 0.875rem;">
+                                        {% if question.custom_options %}
+                                            选项: 
+                                            {% for key, value in question.custom_options.items() %}
+                                                {{ key }}.{{ value }}{% if not loop.last %}，{% endif %}
+                                            {% endfor %}
+                                        {% endif %}
+                                    </p>
+                                    {% else %}
+                                    <span class="badge bg-secondary mb-2">标准问题</span>
+                                    {% endif %}
+                                </div>
+                                <div class="question-actions" onclick="event.stopPropagation()">
+                                    <div class="btn-group btn-group-sm me-2">
+                                        {% if not loop.first %}
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                onclick="moveQuestion({{ question.id }}, 'top', {{ survey.id }})" 
+                                                title="置顶">⇈</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                onclick="moveQuestion({{ question.id }}, 'up', {{ survey.id }})" 
+                                                title="上移">↑</button>
+                                        {% endif %}
+                                        {% if not loop.last %}
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                onclick="moveQuestion({{ question.id }}, 'down', {{ survey.id }})" 
+                                                title="下移">↓</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                onclick="moveQuestion({{ question.id }}, 'bottom', {{ survey.id }})" 
+                                                title="置底">⇊</button>
+                                        {% endif %}
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-primary" 
+                                            data-question-id="{{ question.id }}"
+                                            data-question-content='{{ question.content|tojson }}'
+                                            onclick="editTableQuestion(this)">
+                                        编辑
+                                    </button>
+                                    <form action="{{ url_for('delete_question', question_id=question.id) }}" method="post" 
+                                          onsubmit="return confirm('确定要删除这个问题吗？');" style="display:inline;">
+                                        <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                    </form>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="empty-state">
+                        <p>暂无问题，请添加问题</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 编辑表格问题的表单 -->
+        <div class="section-card" id="editTableQuestionCard" style="display: none;">
+            <div class="section-header">编辑问题</div>
+            <form id="editTableQuestionForm" method="post">
+                <div class="mb-3">
+                    <label for="edit_table_question_content" class="form-label">问题内容（列标题）</label>
+                    <textarea class="form-control" id="edit_table_question_content" name="content" rows="2" required></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" onclick="cancelEditTableQuestion()">取消</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- 导入人名列表 -->
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">📝</span>
+                    <span>导入人名列表</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('edit_survey', survey_id=survey.id) }}" method="post">
+                    <input type="hidden" name="action" value="import_respondents">
+                    <div class="mb-3">
+                        <label for="name_list" class="form-label">人名列表（每行一个人名）</label>
+                        <textarea class="form-control" id="name_list" name="name_list" 
+                                  rows="10" placeholder="每行输入一个人名，例如：&#10;叶丹&#10;刘海岚&#10;黄青青"></textarea>
+                        <small class="text-muted mt-1 d-block">💡 提示：只输入一行也可以，用于添加单个人名</small>
+                    </div>
+                    <button type="submit" class="btn btn-success">导入</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 人名列表 -->
+        <div class="section-card always-visible">
+            <div class="section-header">
+                <div class="section-header-title">
+                    <span class="section-icon">👥</span>
+                    <span>人名列表</span>
+                </div>
+            </div>
+            <div class="section-content show">
+                <div class="question-list-container">
+                    {% if respondents %}
+                    <div class="list-group">
+                        {% for respondent in respondents %}
+                        <div class="list-group-item respondent-item">
+                            <span class="respondent-name">{{ respondent.name }}</span>
+                            <form action="{{ url_for('delete_respondent', respondent_id=respondent.id) }}" method="post" 
+                                  onsubmit="return confirm('确定要删除 \"{{ respondent.name }}\" 吗？');" style="display:inline;">
+                                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="empty-state">
+                        <p>暂无人名，请添加人名</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<script>
+    // 编辑单选题问题
+    function editQuestion(button) {
+        try {
+            const questionId = button.getAttribute('data-question-id');
+            const contentStr = button.getAttribute('data-question-content');
+            const content = JSON.parse(contentStr);
+            const optionCount = parseInt(button.getAttribute('data-option-count'));
+            
+            document.getElementById('edit_question_content').value = content;
+            document.getElementById('edit_option_count').value = optionCount;
+            document.getElementById('editQuestionForm').action = "{{ url_for('update_question', question_id=0) }}".replace('0', questionId);
+            
+            // 显示编辑表单
+            const editCard = document.getElementById('editQuestionCard');
+            editCard.style.display = 'block';
+            editCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (e) {
+            console.error('编辑问题时出错:', e);
+            alert('编辑问题时出错，请刷新页面后重试');
+        }
+    }
+
+    // 取消编辑问题
+    function cancelEditQuestion() {
+        document.getElementById('editQuestionCard').style.display = 'none';
+    }
+
+    // 编辑表格问题
+    function editTableQuestion(button) {
+        try {
+            const questionId = button.getAttribute('data-question-id');
+            const contentStr = button.getAttribute('data-question-content');
+            const content = JSON.parse(contentStr);
+            
+            document.getElementById('edit_table_question_content').value = content;
+            document.getElementById('editTableQuestionForm').action = "{{ url_for('update_question', question_id=0) }}".replace('0', questionId);
+            
+            // 显示编辑表单
+            const editCard = document.getElementById('editTableQuestionCard');
+            editCard.style.display = 'block';
+            editCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (e) {
+            console.error('编辑问题时出错:', e);
+            alert('编辑问题时出错，请刷新页面后重试');
+        }
+    }
+
+    // 取消编辑表格问题
+    function cancelEditTableQuestion() {
+        document.getElementById('editTableQuestionCard').style.display = 'none';
+    }
+
+    // 切换折叠卡片
+    function toggleSectionCard(header) {
+        const card = header.parentElement;
+        
+        // 如果是always-visible，不处理
+        if (card.classList.contains('always-visible')) {
+            return;
+        }
+        
+        const content = card.querySelector('.section-content');
+        const icon = header.querySelector('.toggle-icon');
+        
+        if (content.classList.contains('show')) {
+            content.classList.remove('show');
+            icon.classList.remove('expanded');
+        } else {
+            content.classList.add('show');
+            icon.classList.add('expanded');
+        }
+    }
+
+    // 全选/取消全选（单选题）
+    function toggleSelectAll() {
+        const checkboxes = document.querySelectorAll('.question-checkbox');
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allChecked);
+        updateSelectedCount();
+    }
+
+    // 更新选中数量（单选题）
+    function updateSelectedCount() {
+        const checkboxes = document.querySelectorAll('.question-checkbox:checked');
+        const countElement = document.getElementById('selected-count');
+        if (countElement) {
+            countElement.textContent = `已选择 ${checkboxes.length} 个问题`;
+        }
+    }
+
+    // 全选/取消全选（表格题）
+    function toggleSelectAllTable() {
+        const checkboxes = document.querySelectorAll('.table-question-checkbox');
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allChecked);
+        updateSelectedTableCount();
+    }
+
+    // 更新选中数量（表格题）
+    function updateSelectedTableCount() {
+        const checkboxes = document.querySelectorAll('.table-question-checkbox:checked');
+        const countElement = document.getElementById('selected-table-count');
+        if (countElement) {
+            countElement.textContent = `已选择 ${checkboxes.length} 个问题`;
+        }
+    }
+
+    // 点击整个条目切换复选框（单选题）
+    function toggleQuestionCheckbox(itemElement, questionId, event) {
+        // 如果点击的是按钮或复选框本身，不处理
+        if (event && (event.target.closest('.question-actions') || event.target.closest('.form-check-input'))) {
+            return;
+        }
+        const checkbox = itemElement.querySelector('.question-checkbox');
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            updateSelectedCount();
+        }
+    }
+
+    // 点击整个条目切换复选框（表格题）
+    function toggleTableQuestionCheckbox(itemElement, questionId, event) {
+        // 如果点击的是按钮或复选框本身，不处理
+        if (event && (event.target.closest('.question-actions') || event.target.closest('.form-check-input'))) {
+            return;
+        }
+        const checkbox = itemElement.querySelector('.table-question-checkbox');
+        if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            updateSelectedTableCount();
+        }
+    }
+    
+    // 拖拽排序功能
+    // 移动问题顺序
+    function moveQuestion(questionId, direction, surveyId) {
+        fetch(`/admin/move_question/${questionId}/${direction}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // 刷新页面以显示新顺序
+                location.reload();
+            } else {
+                alert('移动失败: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('移动失败:', error);
+            alert('移动失败，请重试');
+        });
+    }
+    
+    // ========== 自定义单选组件 - 动态选项管理（问卷型） ==========
+    let customOptionIndex = 2; // 从Y开始（Z、Y已有）
+    const optionLetters = 'ZYXWVUTSRQPONMLKJIHGFEDCBA';  // 逆序字母，避免与标准选项A、B、C冲突
+    
+    function addCustomOption() {
+        const container = document.getElementById('custom_options_container');
+        const currentCount = container.querySelectorAll('.custom-option-item').length;
+        
+        if (currentCount >= 26) {
+            alert('最多只能添加26个选项');
+            return;
+        }
+        
+        const nextLetter = optionLetters[currentCount];
+        const div = document.createElement('div');
+        div.className = 'custom-option-item mb-2';
+        div.innerHTML = `
+            <div class="input-group">
+                <input type="text" class="form-control" name="option_${nextLetter}" placeholder="请输入选项内容" required>
+                <button type="button" class="btn btn-outline-danger" onclick="removeCustomOption(this)">
+                    <span>✕</span>
+                </button>
+            </div>
+        `;
+        container.appendChild(div);
+        updateCustomDeleteButtons();
+    }
+    
+    function removeCustomOption(button) {
+        const container = document.getElementById('custom_options_container');
+        const items = container.querySelectorAll('.custom-option-item');
+        
+        if (items.length <= 2) {
+            alert('至少需要保留2个选项');
+            return;
+        }
+        
+        button.closest('.custom-option-item').remove();
+        
+        // 重新分配选项名称（A, B, C...）
+        const remainingItems = container.querySelectorAll('.custom-option-item');
+        remainingItems.forEach((item, index) => {
+            const input = item.querySelector('input');
+            input.name = 'option_' + optionLetters[index];
+        });
+        
+        updateCustomDeleteButtons();
+    }
+    
+    function updateCustomDeleteButtons() {
+        const container = document.getElementById('custom_options_container');
+        const items = container.querySelectorAll('.custom-option-item');
+        const deleteButtons = container.querySelectorAll('.btn-outline-danger');
+        
+        deleteButtons.forEach((btn, index) => {
+            btn.disabled = (items.length <= 2);
+        });
+    }
+    
+    // ========== 自定义单选组件 - 动态选项管理（表格型） ==========
+    function addTableCustomOption() {
+        const container = document.getElementById('table_custom_options_container');
+        const currentCount = container.querySelectorAll('.custom-option-item').length;
+        
+        if (currentCount >= 26) {
+            alert('最多只能添加26个选项');
+            return;
+        }
+        
+        const nextLetter = optionLetters[currentCount];
+        const div = document.createElement('div');
+        div.className = 'custom-option-item mb-2';
+        div.innerHTML = `
+            <div class="input-group">
+                <input type="text" class="form-control" name="option_${nextLetter}" placeholder="请输入选项内容" required>
+                <button type="button" class="btn btn-outline-danger" onclick="removeTableCustomOption(this)">
+                    <span>✕</span>
+                </button>
+            </div>
+        `;
+        container.appendChild(div);
+        updateTableCustomDeleteButtons();
+    }
+    
+    function removeTableCustomOption(button) {
+        const container = document.getElementById('table_custom_options_container');
+        const items = container.querySelectorAll('.custom-option-item');
+        
+        if (items.length <= 2) {
+            alert('至少需要保留2个选项');
+            return;
+        }
+        
+        button.closest('.custom-option-item').remove();
+        
+        // 重新分配选项名称（A, B, C...）
+        const remainingItems = container.querySelectorAll('.custom-option-item');
+        remainingItems.forEach((item, index) => {
+            const input = item.querySelector('input');
+            input.name = 'option_' + optionLetters[index];
+        });
+        
+        updateTableCustomDeleteButtons();
+    }
+    
+    function updateTableCustomDeleteButtons() {
+        const container = document.getElementById('table_custom_options_container');
+        const items = container.querySelectorAll('.custom-option-item');
+        const deleteButtons = container.querySelectorAll('.btn-outline-danger');
+        
+        deleteButtons.forEach((btn, index) => {
+            btn.disabled = (items.length <= 2);
+        });
+    }
+    
+</script>
+{% endblock %}

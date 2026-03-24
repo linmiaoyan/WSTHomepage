@@ -543,6 +543,24 @@ def api_admin_gate_check():
     return jsonify({'ok': ok})
 
 
+@app.route("/go/quickvote")
+def go_quickvote():
+    """跳转至原版 QuickVote（民主测评、二维码等）。URL 由 .env 的 QUICKVOTE_PUBLIC_URL 配置。"""
+    if not _admin_api_authorized():
+        return redirect("/index.html", code=302)
+    u = (_env_get("QUICKVOTE_PUBLIC_URL", "http://127.0.0.1:8001").strip() or "http://127.0.0.1:8001")
+    return redirect(u, code=302)
+
+
+@app.route("/go/teacher-data-system")
+def go_teacher_data_system():
+    """跳转至原版 TeacherDataSystem（教师库、PDF 模板与任务等）。URL 由 .env 的 TEACHERDATA_PUBLIC_URL 配置。"""
+    if not _admin_api_authorized():
+        return redirect("/index.html", code=302)
+    u = (_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002")
+    return redirect(u, code=302)
+
+
 @app.route('/api/request-parse', methods=['POST'])
 def api_request_parse():
     """Parse teacher natural language into {type, params} for approval queue."""
@@ -2759,5 +2777,6 @@ def api_quickvote_responses(sid: str):
 
 
 if __name__ == '__main__':
+    _main_port = int(_env_get("PORT", "8000") or "8000")
     # 开发环境显式开启线程，避免单个慢请求阻塞其他接口
-    app.run(host='0.0.0.0', port=8000, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=_main_port, debug=True, threaded=True)

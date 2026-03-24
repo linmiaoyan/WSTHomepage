@@ -1,0 +1,10 @@
+flask
+flask_login
+reportlab
+flask_sqlalchemy
+sqlalchemy
+pandas
+openpyxl
+qrcode
+pillow
+python-dotenv

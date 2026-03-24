@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教师数据自填系统</title>
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #f8f9fa;
+        }
+        .main-content {
+            padding: 20px;
+        }
+        .nav-link {
+            color: #495057;
+        }
+        .nav-link.active {
+            background-color: #0d6efd;
+            color: white;
+        }
+        .card {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-2 sidebar p-3">
+                <h4 class="mb-4">教师数据自填系统</h4>
+                <ul class="nav nav-pills flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" data-page="teachers">
+                            <i class="bi bi-people"></i> 教师管理
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="templates">
+                            <i class="bi bi-file-earmark"></i> 模板管理
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="tasks">
+                            <i class="bi bi-list-task"></i> 填报任务
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- 主内容区 -->
+            <div class="col-md-10 main-content">
+                <!-- 教师管理页面 -->
+                <div id="page-teachers" class="page-content">
+                    <h2>教师管理</h2>
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>教师列表</span>
+                            <div>
+                                <button class="btn btn-info me-2" onclick="exportTeachersToCSV()">
+                                    <i class="bi bi-filetype-csv"></i> 导出CSV
+                                </button>
+                                <button class="btn btn-success me-2" onclick="showImportModal()">
+                                    <i class="bi bi-upload"></i> 导入Excel
+                                </button>
+                                <button class="btn btn-primary me-2" onclick="showAddTeacherModal()">
+                                    <i class="bi bi-plus"></i> 添加教师
+                                </button>
+                                <button class="btn btn-danger" onclick="deleteAllTeachers()">
+                                    <i class="bi bi-trash"></i> 全部删除
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>姓名</th>
+                                        <th>性别</th>
+                                        <th>部门</th>
+                                        <th>职位</th>
+                                        <th>手机号</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="teachers-table-body">
+                                    <tr><td colspan="7" class="text-center">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 模板管理页面 -->
+                <div id="page-templates" class="page-content" style="display: none;">
+                    <h2>模板管理</h2>
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>模板列表</span>
+                            <button class="btn btn-primary" onclick="showUploadTemplateModal()">
+                                <i class="bi bi-upload"></i> 上传模板
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="templates-list" class="row">
+                                <div class="col-12 text-center">加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 填报任务页面 -->
+                <div id="page-tasks" class="page-content" style="display: none;">
+                    <h2>填报任务</h2>
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>任务列表</span>
+                            <button class="btn btn-primary" onclick="showCreateTaskModal()">
+                                <i class="bi bi-plus"></i> 创建任务
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="tasks-list">
+                                <div class="text-center">加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+    
+    <!-- 模态框等会在JS中动态创建 -->
+    
+    <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
+

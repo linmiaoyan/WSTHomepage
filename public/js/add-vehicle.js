@@ -9,6 +9,7 @@ const API_VEHICLE_NLP = "/api/vehicle-nlp";
 const API_SCHOOLISOVER_TOKEN = "/api/schoolisover-token";
 const API_CONTACTS_SEARCH = "/api/contacts-search";
 const VEHICLE_PREFILL_STORAGE_KEY = "ke_vehicle_prefill_v1";
+let activePrefill = null;
 
 /**
  * 从审批页写入的 sessionStorage + URL 查询参数合并读取预填数据（URL 优先覆盖同名键）。
@@ -486,7 +487,36 @@ async function submitForm() {
         const codeStr = (data && data.code !== undefined && data.code !== null) ? String(data.code) : "";
         const isOkCode = (codeStr === "" || codeStr === "200" || codeStr === "1");
         if (resp.ok && isOkCode) {
-            setStatus("成功：" + (data.msg || "已添加车牌"), "ok");
+            // 若来自审批单预填，提交成功后将 team_uid 等参数回写到该审批单，避免审批执行时缺参
+            let extra = "";
+            const rid = activePrefill && String(activePrefill.from_request || "").trim();
+            if (rid) {
+                try {
+                    const patchResp = await fetch("/api/admin/requests/" + encodeURIComponent(rid) + "/patch-add-vehicle", {
+                        method: "POST",
+                        headers: { "content-type": "application/json" },
+                        credentials: "same-origin",
+                        body: JSON.stringify({
+                            team_uid: teamUid,
+                            plate_no: plateNo,
+                            plate_type: plateType,
+                            remark: remark,
+                            start_date: startDate,
+                            end_date: endDate,
+                            reset_to_pending: true
+                        })
+                    });
+                    const patchData = await patchResp.json().catch(() => ({}));
+                    if (patchResp.ok && patchData && patchData.ok) {
+                        extra = "；并已同步回审批单#" + rid + "（重置为待审核）";
+                    } else {
+                        extra = "；但回写审批单失败，请回审核页重试（" + (patchData.msg || patchResp.status) + "）";
+                    }
+                } catch (e) {
+                    extra = "；但回写审批单失败：" + e.message;
+                }
+            }
+            setStatus("成功：" + (data.msg || "已添加车牌") + extra, "ok");
         } else {
             const debugText = data && data._debug ? (data._debug.cloud_text_head || data._debug._raw_text_head || '') : '';
             const baseMsg = data.msg || (resp.status + " " + resp.statusText);
@@ -519,6 +549,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     toggleTempDateVisibility();
 
     const pre = readVehiclePrefill();
+    activePrefill = pre;
     if (pre) {
         applyVehiclePrefill(pre);
         try {

@@ -852,6 +852,54 @@ def api_admin_review_request(rid: int):
         conn.close()
 
 
+@app.route('/api/admin/requests/<int:rid>/patch-add-vehicle', methods=['POST'])
+def api_admin_patch_add_vehicle_request(rid: int):
+    """
+    管理员在「添加职工车牌」页选好职工后，将 team_uid 等字段回写到审批单 params_json。
+    可选 reset_to_pending=1：把已通过（但执行失败）的单重置为待审核，便于重新审批执行。
+    """
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    data = request.get_json(force=True, silent=True) or {}
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "msg": "not found"}), 404
+        if str(row["type"] or "") != "add_vehicle":
+            return jsonify({"ok": False, "msg": "仅支持 add_vehicle 类型"}), 400
+
+        try:
+            params = json.loads(row["params_json"] or "{}")
+        except Exception:
+            params = {}
+        if not isinstance(params, dict):
+            params = {}
+
+        # 仅覆盖本次明确传入且非空的字段，避免误清空已有参数
+        for k in ("team_uid", "plate_no", "plate_type", "remark", "start_date", "end_date"):
+            if k in data:
+                v = str(data.get(k) or "").strip()
+                if v:
+                    params[k] = v
+
+        params_json = json.dumps(params, ensure_ascii=False)
+        reset_to_pending = str(data.get("reset_to_pending") or "").strip().lower() in ("1", "true", "yes", "on")
+        if reset_to_pending:
+            conn.execute(
+                "UPDATE requests SET params_json=?, status='pending', reviewed_at=NULL, review_comment=NULL, execute_result=NULL, executed_at=NULL WHERE id=?",
+                (params_json, rid),
+            )
+            msg = "已回写车牌参数，并重置为待审核"
+        else:
+            conn.execute("UPDATE requests SET params_json=? WHERE id=?", (params_json, rid))
+            msg = "已回写车牌参数"
+        conn.commit()
+        return jsonify({"ok": True, "msg": msg, "data": {"id": rid, "params": params}})
+    finally:
+        conn.close()
+
+
 def _get_flask_secret_key():
     # order: env var -> KeAdmin .env -> random per run
     t = (os.environ.get("FLASK_SECRET_KEY") or "").strip()
@@ -910,6 +958,7 @@ def _dingtalk_user_access_token(code: str):
 
 
 _DT_APP_TOKEN_CACHE = {"token": "", "expires_at": 0}
+_DT_USER_RESOLVE_CACHE = {}
 
 def _dingtalk_app_access_token(force_refresh: bool = False) -> str:
     """
@@ -963,6 +1012,51 @@ def _dingtalk_h5_userinfo_by_code(auth_code: str) -> dict:
         "summary": "钉钉userId:" + uid,
     }
     return prof
+
+
+def _dingtalk_user_profile_by_userid(user_id: str) -> dict:
+    """
+    通过钉钉企业内部应用 access_token + userId 查询用户资料（姓名/手机号等）。
+    需要通讯录读取权限；无权限时返回仅含 userId 的最小结构。
+    """
+    uid = str(user_id or "").strip()
+    if not uid:
+        return {}
+
+    now = int(time.time())
+    c = _DT_USER_RESOLVE_CACHE.get(uid)
+    if isinstance(c, dict) and int(c.get("expires_at") or 0) > now + 10:
+        return dict(c.get("profile") or {})
+
+    try:
+        app_token = _dingtalk_app_access_token()
+        # 企业内部应用按 userId 查人：topapi/v2/user/get
+        url = "https://oapi.dingtalk.com/topapi/v2/user/get"
+        r = requests.post(
+            url,
+            params={"access_token": app_token},
+            json={"userid": uid, "language": "zh_CN"},
+            timeout=15,
+        )
+        j = r.json() if r.status_code == 200 else {}
+        if str(j.get("errcode")) in ("0", "None", ""):
+            res = j.get("result") if isinstance(j.get("result"), dict) else {}
+            p = {
+                "userId": uid,
+                "name": str(res.get("name") or "").strip(),
+                "mobile": str(res.get("mobile") or "").strip(),
+                "title": str(res.get("title") or "").strip(),
+            }
+            p["display_name"] = p["name"] or ("钉钉userId:" + uid)
+            p["summary"] = p["name"] or ("钉钉userId:" + uid)
+            _DT_USER_RESOLVE_CACHE[uid] = {"expires_at": now + 300, "profile": p}
+            return p
+    except Exception:
+        pass
+
+    p = {"userId": uid, "display_name": "钉钉userId:" + uid, "summary": "钉钉userId:" + uid}
+    _DT_USER_RESOLVE_CACHE[uid] = {"expires_at": now + 120, "profile": p}
+    return p
 
 def _dingtalk_me(access_token: str):
     url = "https://api.dingtalk.com/v1.0/contact/users/me"
@@ -1038,6 +1132,31 @@ def api_me():
     if not u:
         return jsonify({"ok": True, "logged_in": False, "user": None})
     return jsonify({"ok": True, "logged_in": True, "user": u})
+
+
+@app.route("/api/admin/dingtalk-users/resolve", methods=["POST"])
+def api_admin_dingtalk_users_resolve():
+    """
+    管理员页按 userId 批量补全姓名展示（避免只显示“钉钉userId:xxxx”）。
+    """
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    data = request.get_json(force=True, silent=True) or {}
+    arr = data.get("user_ids") if isinstance(data.get("user_ids"), list) else []
+    ids = []
+    seen = set()
+    for x in arr:
+        uid = str(x or "").strip()
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+        if len(ids) >= 100:
+            break
+    out = {}
+    for uid in ids:
+        out[uid] = _dingtalk_user_profile_by_userid(uid)
+    return jsonify({"ok": True, "data": out})
 
 
 @app.route("/api/dingtalk/web-config", methods=["GET"])

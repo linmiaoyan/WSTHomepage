@@ -103,6 +103,8 @@
 const API_LIST = "/api/admin/requests";
 const API_GET = (id) => "/api/admin/requests/" + id;
 const API_REVIEW = (id) => "/api/admin/requests/" + id + "/review";
+const API_RESOLVE_USERS = "/api/admin/dingtalk-users/resolve";
+const USER_RESOLVE_CACHE = {};
 
 const TYPE_FILTER = (function () {
     try {
@@ -157,8 +159,12 @@ function esc(s) {
 
 function requesterCell(r) {
     if (!r || typeof r !== "object") return "-";
+    const uid = String(r.userId || "").trim();
+    if (uid && USER_RESOLVE_CACHE[uid] && USER_RESOLVE_CACHE[uid].display_name) {
+        return esc(USER_RESOLVE_CACHE[uid].display_name);
+    }
     if (r.summary) return esc(r.summary);
-    return esc(r.display_name || r.name || r.nick || r.userId || "-");
+    return esc(r.display_name || r.name || r.nick || (uid ? ("钉钉userId:" + uid) : "-"));
 }
 
 function renderRequesterDetail(rq) {
@@ -170,8 +176,10 @@ function renderRequesterDetail(rq) {
         return;
     }
     box.style.display = "";
+    const uid = String((rq && rq.userId) || "").trim();
+    const resolved = uid ? USER_RESOLVE_CACHE[uid] : null;
     const rows = [
-        ["姓名 / 摘要", rq.summary || rq.display_name || [rq.name, rq.nick].filter(Boolean).join(" · ") || "-"],
+        ["姓名 / 摘要", (resolved && (resolved.display_name || resolved.name)) || rq.summary || rq.display_name || [rq.name, rq.nick].filter(Boolean).join(" · ") || (uid ? ("钉钉userId:" + uid) : "-")],
         ["手机", rq.mobile || rq.telephone || "-"],
         ["钉钉用户ID", rq.userId || "-"],
         ["本单提交时间", rq.submitted_at ? fmt(rq.submitted_at) : "-"],
@@ -185,6 +193,34 @@ function renderRequesterDetail(rq) {
     });
     html += "</tbody></table>";
     box.innerHTML = html;
+}
+
+async function resolveRequesterUsers(items) {
+    const need = [];
+    const seen = {};
+    (items || []).forEach(function (it) {
+        const rq = it && it.requester;
+        const uid = rq ? String(rq.userId || "").trim() : "";
+        if (!uid) return;
+        if (USER_RESOLVE_CACHE[uid]) return;
+        if (seen[uid]) return;
+        seen[uid] = true;
+        need.push(uid);
+    });
+    if (!need.length) return;
+    try {
+        const r = await fetch(API_RESOLVE_USERS, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ user_ids: need })
+        });
+        const d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d || !d.ok || typeof d.data !== "object") return;
+        Object.keys(d.data).forEach(function (uid) {
+            if (uid) USER_RESOLVE_CACHE[uid] = d.data[uid] || {};
+        });
+    } catch (e) {}
 }
 
 function studentsText(params) {
@@ -342,6 +378,7 @@ async function loadList() {
             document.getElementById("hint").textContent = TYPE_FILTER ? ("暂无「" + typeLabelZh(TYPE_FILTER) + "」记录") : "暂无记录";
             return;
         }
+        await resolveRequesterUsers(d);
         tbody.innerHTML = d.map(it => `
             <tr>
                 <td>${it.id}</td>
@@ -382,6 +419,7 @@ async function openDetail(id) {
         }
         if (!r.ok || !d.ok) throw new Error(d.msg || r.status);
         currentDetail = d.data;
+        await resolveRequesterUsers([currentDetail]);
         const rq = currentDetail.requester;
         document.getElementById("detailMeta").textContent =
             `编号 ${currentDetail.id} · ${typeLabelZh(currentDetail.type)} · ${statusZh(currentDetail.status)} · 创建 ${fmt(currentDetail.created_at)}`;

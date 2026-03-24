@@ -188,7 +188,8 @@ def admin_login():
         return redirect(url_for('index'))
     session['is_admin'] = True
     login_user(admin_user, remember=True)
-    return redirect(url_for('admin'))
+    # 统一回到首页，由 index() 根据管理员会话渲染管理页，避免部分部署对 /admin 路由转发不一致。
+    return redirect(url_for('index'))
 
 @app.route('/admin_logout')
 def admin_logout():
@@ -207,6 +208,7 @@ def ensure_admin_session():
 
 
 @app.route('/admin')
+@app.route('/admin/')
 def admin():
     guard = ensure_admin_session()
     if guard:

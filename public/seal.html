@@ -79,6 +79,30 @@
         </div>
       </div>
     </div>
+    <div class="cardx mt-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <b><i class="bi bi-clock-history"></i> 我的校章申请</b>
+        <div class="d-flex align-items-center gap-2">
+          <span class="muted small" id="mySealHint"></span>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="mySealRefreshBtn"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="width:90px;">ID</th>
+              <th style="width:120px;">状态</th>
+              <th style="width:220px;">提交时间</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody id="mySealTbody">
+            <tr><td colspan="4" class="text-center muted">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script src="/js/pdf.min.js"></script>
@@ -93,6 +117,7 @@
     if (SEAL_EMBED) document.body.classList.add('seal-embed');
     const API_SEAL = "/api/seal-request";
     const API_ME = "/api/me";
+    const API_MY_REQUESTS = "/api/my-requests";
     const API_SEAL_STAMP = "/api/seal-stamp";
     let stampImageUrl = "/images/seal-placeholder.png";
     const stampPositions = []; // {x,y} PDF points (current single-page)
@@ -104,6 +129,62 @@
 
     function setStatus(t, cls){ const el=document.getElementById('status'); el.textContent=t||''; el.className=cls||'muted'; }
     function setCount(){ document.getElementById('countHint').textContent = '已选：' + stampPositions.length + ' 处'; }
+    function statusZh(s){
+      if (s === "pending") return '<span class="badge text-bg-secondary">待审核</span>';
+      if (s === "approved") return '<span class="badge text-bg-success">已通过</span>';
+      if (s === "rejected") return '<span class="badge text-bg-danger">已驳回</span>';
+      return '<span class="badge text-bg-light">未知</span>';
+    }
+    function fmt(t){
+      if(!t) return "-";
+      try { return new Date(t).toLocaleString("zh-CN"); } catch(e) { return String(t); }
+    }
+    function esc(s){
+      if (s === null || s === undefined) return "";
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    async function loadMySealRequests() {
+      var tbody = document.getElementById("mySealTbody");
+      var hint = document.getElementById("mySealHint");
+      if (!tbody || !hint) return;
+      if (!loggedIn) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center muted">请先登录后查看</td></tr>';
+        hint.textContent = "";
+        return;
+      }
+      hint.textContent = "加载中…";
+      try {
+        const r = await fetch(API_MY_REQUESTS, { credentials: "same-origin" });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 401 && d && d.need_login) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">登录状态失效，请刷新页面重试</td></tr>';
+          hint.textContent = "未登录";
+          return;
+        }
+        if (!r.ok || !d.ok || !Array.isArray(d.data)) throw new Error(d.msg || r.status);
+        var rows = d.data.filter(function(it){ return String((it && it.type) || "") === "seal"; });
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center muted">暂无校章申请记录</td></tr>';
+          hint.textContent = "共 0 条";
+          return;
+        }
+        tbody.innerHTML = rows.map(function(it){
+          var p = (it && it.params) || {};
+          var remark = (p.remark || "").trim();
+          return '<tr>'
+            + '<td>' + esc(String(it.id || "-")) + '</td>'
+            + '<td>' + statusZh(it.status) + '</td>'
+            + '<td>' + esc(fmt(it.created_at)) + '</td>'
+            + '<td style="max-width:320px;white-space:pre-wrap;">' + esc(remark || "-") + '</td>'
+            + '</tr>';
+        }).join("");
+        hint.textContent = "共 " + rows.length + " 条";
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">加载失败：' + esc(e.message || e) + '</td></tr>';
+        hint.textContent = "加载失败";
+      }
+    }
 
     async function loadSealStampUrl() {
       try {
@@ -126,13 +207,16 @@
           loggedIn = true;
           hint.textContent = "已登录：" + (u.summary || u.display_name || u.name || u.nick || u.userId || "未知");
           logoutBtn.style.display = "";
+          loadMySealRequests();
         } else {
           loggedIn = false;
           hint.textContent = "未登录（正在自动免登中；失败请刷新页面重试）";
           logoutBtn.style.display = "none";
+          loadMySealRequests();
         }
       } catch (e) {
         loggedIn = false;
+        loadMySealRequests();
       }
     }
 
@@ -248,6 +332,7 @@
         }
         if(!r.ok || !d.ok) { setStatus('提交失败：'+(d.msg||d.detail||r.status),'err'); return; }
         setStatus('已入队，ID='+d.id+'（等待管理员审核）','ok');
+        loadMySealRequests();
       }catch(err){
         setStatus('请求失败：'+(err.message||err),'err');
       }finally{
@@ -255,6 +340,7 @@
       }
     });
 
+    document.getElementById("mySealRefreshBtn").addEventListener("click", loadMySealRequests);
     loadMe();
     loadSealStampUrl();
   </script>

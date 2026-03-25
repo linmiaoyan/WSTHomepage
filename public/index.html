@@ -121,6 +121,12 @@
             align-items: center;
             gap: 6px;
         }
+        body.embed-mode .top-navbar {
+            display: none;
+        }
+        body.embed-mode .tab-bar {
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -165,6 +171,13 @@
 
     <script>
         (function () {
+            var EMBED_MODE = false;
+            try {
+                EMBED_MODE = (new URLSearchParams(location.search).get("embed") === "1");
+            } catch (e) {}
+            if (EMBED_MODE) {
+                document.body.classList.add("embed-mode");
+            }
             var STORAGE_KEY = "autoAdminAccessOk";
 
             var gate = document.getElementById("gate");

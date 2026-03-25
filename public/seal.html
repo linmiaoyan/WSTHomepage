@@ -95,10 +95,11 @@
               <th style="width:120px;">状态</th>
               <th style="width:220px;">提交时间</th>
               <th>备注</th>
+              <th style="width:120px;">结果</th>
             </tr>
           </thead>
           <tbody id="mySealTbody">
-            <tr><td colspan="4" class="text-center muted">加载中…</td></tr>
+            <tr><td colspan="5" class="text-center muted">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -149,7 +150,7 @@
       var hint = document.getElementById("mySealHint");
       if (!tbody || !hint) return;
       if (!loggedIn) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center muted">请先登录后查看</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center muted">请先登录后查看</td></tr>';
         hint.textContent = "";
         return;
       }
@@ -158,30 +159,33 @@
         const r = await fetch(API_MY_REQUESTS, { credentials: "same-origin" });
         const d = await r.json().catch(() => ({}));
         if (r.status === 401 && d && d.need_login) {
-          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">登录状态失效，请刷新页面重试</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">登录状态失效，请刷新页面重试</td></tr>';
           hint.textContent = "未登录";
           return;
         }
         if (!r.ok || !d.ok || !Array.isArray(d.data)) throw new Error(d.msg || r.status);
         var rows = d.data.filter(function(it){ return String((it && it.type) || "") === "seal"; });
         if (!rows.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="text-center muted">暂无校章申请记录</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center muted">暂无校章申请记录</td></tr>';
           hint.textContent = "共 0 条";
           return;
         }
         tbody.innerHTML = rows.map(function(it){
           var p = (it && it.params) || {};
+          var ex = (it && it.execute_result) || null;
+          var stamped = (ex && typeof ex === "object" && (ex.stamped_pdf_url || ex.stampedPdfUrl)) ? (ex.stamped_pdf_url || ex.stampedPdfUrl) : "";
           var remark = (p.remark || "").trim();
           return '<tr>'
             + '<td>' + esc(String(it.id || "-")) + '</td>'
             + '<td>' + statusZh(it.status) + '</td>'
             + '<td>' + esc(fmt(it.created_at)) + '</td>'
             + '<td style="max-width:320px;white-space:pre-wrap;">' + esc(remark || "-") + '</td>'
+            + '<td>' + (stamped ? ('<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="' + esc(stamped) + '">下载</a>') : '<span class="muted">-</span>') + '</td>'
             + '</tr>';
         }).join("");
         hint.textContent = "共 " + rows.length + " 条";
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">加载失败：' + esc(e.message || e) + '</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">加载失败：' + esc(e.message || e) + '</td></tr>';
         hint.textContent = "加载失败";
       }
     }

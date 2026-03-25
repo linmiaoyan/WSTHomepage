@@ -939,6 +939,59 @@ def api_admin_review_request(rid: int):
         conn.close()
 
 
+def _seal_result_filename(rid: int) -> str:
+    return f"seal_result_{rid}.pdf"
+
+
+@app.route("/api/admin/requests/<int:rid>/seal-result", methods=["POST"])
+def api_admin_upload_seal_result(rid: int):
+    """管理员上传盖章后的 PDF，保存后教师端可下载。"""
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    f = request.files.get("pdf") or request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "msg": "缺少 pdf 文件"}), 400
+    name = str(f.filename).lower()
+    if not name.endswith(".pdf"):
+        return jsonify({"ok": False, "msg": "只支持 PDF"}), 400
+
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "msg": "not found"}), 404
+        if str(row["type"] or "") != "seal":
+            return jsonify({"ok": False, "msg": "仅支持 seal 类型"}), 400
+
+        fn = _seal_result_filename(rid)
+        save_path = os.path.join(UPLOADS_DIR, fn)
+        try:
+            f.save(save_path)
+        except OSError as e:
+            return jsonify({"ok": False, "msg": str(e)}), 500
+
+        # 合并/写入 execute_result：保留既有字段，追加 stamped_pdf_url
+        keys = list(row.keys())
+        exec_raw = row["execute_result"] if "execute_result" in keys else None
+        try:
+            exec_obj = json.loads(exec_raw) if exec_raw else {}
+        except Exception:
+            exec_obj = {}
+        if not isinstance(exec_obj, dict):
+            exec_obj = {}
+        exec_obj["stamped_pdf_url"] = f"/uploads/{fn}"
+        # 对 seal 来说 executed_at 表示“结果文件已更新”的时间也合理
+        executed_at = _now_iso()
+        conn.execute(
+            "UPDATE requests SET execute_result=?, executed_at=? WHERE id=?",
+            (json.dumps(exec_obj, ensure_ascii=False, default=str), executed_at, rid),
+        )
+        conn.commit()
+        return jsonify({"ok": True, "url": exec_obj["stamped_pdf_url"]})
+    finally:
+        conn.close()
+
+
 @app.route('/api/admin/requests/<int:rid>/patch-add-vehicle', methods=['POST'])
 def api_admin_patch_add_vehicle_request(rid: int):
     """

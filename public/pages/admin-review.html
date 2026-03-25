@@ -37,6 +37,19 @@
         <div class="muted mt-2" id="hint"></div>
     </div>
 
+    <div id="sealStampAdminWrap" class="cardx mb-3" style="display:none;">
+        <div class="fw-semibold mb-2"><i class="bi bi-image"></i> 校章预览图（教师选点界面）</div>
+        <div class="muted small mb-2">教师端选盖章位置时会显示此图；未上传时为纯白占位。上传一次后保存在服务器，长期生效。</div>
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            <img id="sealStampPreview" alt="校章预览" style="height:72px;width:72px;object-fit:contain;border:1px solid var(--border-color);background:#fff;" />
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <input type="file" class="form-control form-control-sm" id="sealStampFile" accept="image/png,image/jpeg,image/webp,image/gif" style="max-width:240px;" />
+                <button type="button" class="btn btn-sm btn-primary" id="sealStampUploadBtn">上传并替换</button>
+            </div>
+            <span class="muted small" id="sealStampHint"></span>
+        </div>
+    </div>
+
     <div class="cardx">
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
@@ -363,23 +376,31 @@ async function loadList() {
     tbody.innerHTML = '<tr><td colspan="6" class="text-center muted">加载中…</td></tr>';
     try {
         const r = await fetch(url, { credentials: "same-origin" });
-        const d = await r.json().catch(() => ([]));
-        if (r.status === 401 && d && d.need_admin_gate) {
+        const raw = await r.json().catch(() => ([]));
+        if (r.status === 401 && raw && raw.need_admin_gate) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">无权限加载列表：请在父页面「管理中心」先输入访问口令，或刷新整页后重试。</td></tr>';
             document.getElementById("hint").textContent = "需先通过管理中心口令";
             return;
         }
-        if (!r.ok) throw new Error((d && d.msg) || d.detail || r.status);
-        if (TYPE_FILTER && Array.isArray(d)) {
-            d = d.filter(function (it) { return String(it.type || "") === TYPE_FILTER; });
+        if (!r.ok) throw new Error((raw && raw.msg) || raw.detail || r.status);
+        let list = [];
+        if (Array.isArray(raw)) {
+            list = raw;
+        } else if (raw && raw.ok && Array.isArray(raw.data)) {
+            list = raw.data;
+        } else if (raw && Array.isArray(raw.data)) {
+            list = raw.data;
         }
-        if (!Array.isArray(d) || d.length === 0) {
+        if (TYPE_FILTER) {
+            list = list.filter(function (it) { return String(it.type || "") === TYPE_FILTER; });
+        }
+        if (!Array.isArray(list) || list.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center muted">暂无记录</td></tr>';
             document.getElementById("hint").textContent = TYPE_FILTER ? ("暂无「" + typeLabelZh(TYPE_FILTER) + "」记录") : "暂无记录";
             return;
         }
-        await resolveRequesterUsers(d);
-        tbody.innerHTML = d.map(it => `
+        await resolveRequesterUsers(list);
+        tbody.innerHTML = list.map(it => `
             <tr>
                 <td>${it.id}</td>
                 <td>${esc(typeLabelZh(it.type))}</td>
@@ -391,7 +412,7 @@ async function loadList() {
                 </td>
             </tr>
         `).join("");
-        document.getElementById("hint").textContent = "共 " + d.length + " 条";
+        document.getElementById("hint").textContent = "共 " + list.length + " 条";
     } catch (e) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">加载失败：' + e.message + '</td></tr>';
         document.getElementById("hint").textContent = "加载失败";
@@ -466,6 +487,54 @@ document.getElementById("approveBtn").addEventListener("click", () => review(tru
 document.getElementById("rejectBtn").addEventListener("click", () => review(false));
 const btnPrefillVehicle = document.getElementById("btnOpenAddVehiclePrefill");
 if (btnPrefillVehicle) btnPrefillVehicle.addEventListener("click", gotoAddVehicleFromRequest);
+
+(function initSealStampAdmin() {
+    if (TYPE_FILTER !== "seal") return;
+    const wrap = document.getElementById("sealStampAdminWrap");
+    const prev = document.getElementById("sealStampPreview");
+    const hint = document.getElementById("sealStampHint");
+    const btn = document.getElementById("sealStampUploadBtn");
+    if (!wrap || !prev || !hint || !btn) return;
+    wrap.style.display = "";
+    async function refreshPreview() {
+        try {
+            const r = await fetch("/api/seal-stamp", { credentials: "same-origin" });
+            const d = await r.json().catch(() => ({}));
+            hint.textContent = "";
+            if (d && d.ok && d.url) prev.src = d.url + "?t=" + Date.now();
+            if (d && d.from_upload) hint.textContent = "（已上传自定义校章图）";
+            else hint.textContent = "（当前为纯白占位）";
+        } catch (e) {
+            hint.textContent = "预览加载失败";
+        }
+    }
+    btn.addEventListener("click", async () => {
+        const inp = document.getElementById("sealStampFile");
+        const f = inp && inp.files && inp.files[0];
+        if (!f) {
+            alert("请先选择图片文件");
+            return;
+        }
+        hint.textContent = "上传中…";
+        try {
+            const fd = new FormData();
+            fd.append("image", f);
+            const r = await fetch("/api/admin/seal-stamp", { method: "POST", credentials: "same-origin", body: fd });
+            const d = await r.json().catch(() => ({}));
+            if (r.status === 401 && d && d.need_admin_gate) {
+                hint.textContent = "需先通过管理中心口令";
+                alert("无权限：请在父页面「管理中心」先输入访问口令。");
+                return;
+            }
+            if (!r.ok || !d.ok) throw new Error(d.msg || r.status);
+            hint.textContent = "已保存";
+            await refreshPreview();
+        } catch (e) {
+            hint.textContent = "上传失败：" + e.message;
+        }
+    });
+    refreshPreview();
+})();
 
 loadList();
 </script>

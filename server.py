@@ -514,9 +514,96 @@ def _execute_approved_queue_item(req: dict) -> dict:
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), 'uploads')
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+SEAL_STAMP_NAMES = ("seal_stamp.png", "seal_stamp.jpg", "seal_stamp.jpeg", "seal_stamp.webp", "seal_stamp.gif")
+
+
+def _write_white_png(path: str, w: int, h: int) -> None:
+    """生成 RGB 纯白 PNG（无第三方依赖），用于校章占位图。"""
+    import struct
+    import zlib as _zlib
+
+    raw = b"".join([b"\x00" + bytes([255] * (w * 3)) for _ in range(h)])
+    comp = _zlib.compress(raw, 9)
+
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", _zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    body = sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", comp) + _chunk(b"IEND", b"")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(body)
+
+
+def _ensure_seal_placeholder_png() -> None:
+    """首次运行时写入 public/images/seal-placeholder.png（纯白占位）。"""
+    rel = os.path.join("images", "seal-placeholder.png")
+    path = os.path.join(WEB_ROOT, rel)
+    if os.path.isfile(path):
+        return
+    try:
+        _write_white_png(path, 160, 160)
+    except OSError:
+        pass
+
+
+_ensure_seal_placeholder_png()
+
+
+def _seal_stamp_upload_path_and_url():
+    """若管理员已上传校章图则返回本地路径与 /uploads/ URL，否则占位图 URL。"""
+    for name in SEAL_STAMP_NAMES:
+        p = os.path.join(UPLOADS_DIR, name)
+        if os.path.isfile(p):
+            return p, f"/uploads/{name}"
+    return None, "/images/seal-placeholder.png"
+
+
+def _remove_seal_stamp_uploads():
+    for name in SEAL_STAMP_NAMES:
+        p = os.path.join(UPLOADS_DIR, name)
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 @app.route('/uploads/<path:filename>')
 def uploads(filename):
     return send_from_directory(UPLOADS_DIR, filename, as_attachment=False)
+
+
+@app.route("/api/seal-stamp", methods=["GET"])
+def api_seal_stamp():
+    """教师选点预览 / 管理端展示：当前校章图 URL（未上传则为纯白占位）。"""
+    _p, url = _seal_stamp_upload_path_and_url()
+    from_upload = bool(_p)
+    return jsonify({"ok": True, "url": url, "from_upload": from_upload})
+
+
+@app.route("/api/admin/seal-stamp", methods=["POST"])
+def api_admin_seal_stamp():
+    """管理员上传校章图，固定覆盖保存；之后教师端与占位逻辑均读同一文件。"""
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
+    f = request.files.get("image") or request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "msg": "缺少图片文件"}), 400
+    name = str(f.filename).lower()
+    ext = os.path.splitext(name)[1].lstrip(".")
+    if ext not in ("png", "jpg", "jpeg", "webp", "gif"):
+        return jsonify({"ok": False, "msg": "仅支持 png / jpg / jpeg / webp / gif"}), 400
+    save_name = "seal_stamp." + ext
+    _remove_seal_stamp_uploads()
+    save_path = os.path.join(UPLOADS_DIR, save_name)
+    try:
+        f.save(save_path)
+    except OSError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+    _u = f"/uploads/{save_name}"
+    return jsonify({"ok": True, "url": _u})
 
 
 @app.route('/api/admin-gate-status', methods=['GET'])

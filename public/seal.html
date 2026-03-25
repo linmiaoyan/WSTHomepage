@@ -18,7 +18,8 @@
     #pdfCanvas { width: 100%; height: auto; display: block; }
     #overlay { position: absolute; inset: 0; pointer-events: auto; cursor: crosshair; }
     .stamp { position: absolute; pointer-events: auto; user-select: none; }
-    .stamp .lbl { background: rgba(37,99,235,.92); color: #fff; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
+    .stamp .stamp-img { width: 72px; height: 72px; object-fit: contain; display: block; border: 1px dashed rgba(0,0,0,.15); background: #fff; }
+    .stamp .lbl { background: rgba(37,99,235,.92); color: #fff; border-radius: 6px; padding: 2px 8px; font-size: 12px; margin-top: 4px; }
     .stamp .del { position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border: none; border-radius: 50%; background: #dc3545; color: #fff; line-height: 18px; font-size: 12px; }
     /* 嵌入教师页 iframe（?embed=1）时精简顶栏 */
     body.seal-embed .wrap { max-width: 100%; margin-top: 10px; }
@@ -92,6 +93,8 @@
     if (SEAL_EMBED) document.body.classList.add('seal-embed');
     const API_SEAL = "/api/seal-request";
     const API_ME = "/api/me";
+    const API_SEAL_STAMP = "/api/seal-stamp";
+    let stampImageUrl = "/images/seal-placeholder.png";
     const stampPositions = []; // {x,y} PDF points (current single-page)
     let fileObj = null;
     let pdfDoc = null;
@@ -101,6 +104,15 @@
 
     function setStatus(t, cls){ const el=document.getElementById('status'); el.textContent=t||''; el.className=cls||'muted'; }
     function setCount(){ document.getElementById('countHint').textContent = '已选：' + stampPositions.length + ' 处'; }
+
+    async function loadSealStampUrl() {
+      try {
+        const r = await fetch(API_SEAL_STAMP, { credentials: "same-origin" });
+        const d = await r.json().catch(() => ({}));
+        if (d && d.ok && d.url) stampImageUrl = d.url;
+      } catch (e) {}
+      if (pdfDoc) renderStamps();
+    }
 
     let loggedIn = false;
     async function loadMe() {
@@ -149,7 +161,9 @@
         d.style.left=sc.x+'px';
         d.style.top=sc.y+'px';
         d.dataset.idx=String(idx);
-        d.innerHTML = '<div class=\"lbl\">校章 #'+(idx+1)+'</div><button class=\"del\" title=\"删除\">×</button>';
+        var su = String(stampImageUrl).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        d.innerHTML = '<img class="stamp-img" src="' + su + '" alt="" draggable="false" />' +
+          '<div class="lbl">校章 #' + (idx + 1) + '</div><button class="del" title="删除">×</button>';
         d.querySelector('.del').addEventListener('click',(e)=>{ e.stopPropagation(); stampPositions.splice(idx,1); setCount(); renderStamps(); });
 
         let dragging=false, sx0=0, sy0=0, l0=0, t0=0;
@@ -242,6 +256,7 @@
     });
 
     loadMe();
+    loadSealStampUrl();
   </script>
 </body>
 </html>

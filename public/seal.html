@@ -15,8 +15,9 @@
     #status.ok { color: var(--success-color); }
     #status.err { color: var(--danger-color); white-space: pre-wrap; }
     .pdf-wrap { position: relative; border: 1px solid var(--border-color); border-radius: 10px; background: #fff; overflow: auto; max-height: 70vh; }
-    #pdfCanvas { width: 100%; height: auto; display: block; }
-    #overlay { position: absolute; inset: 0; pointer-events: auto; cursor: crosshair; }
+    #pdfInner { position: relative; display: inline-block; }
+    #pdfCanvas { display: block; }
+    #overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: auto; cursor: crosshair; }
     .stamp { position: absolute; pointer-events: auto; user-select: none; }
     .stamp .stamp-img { width: 72px; height: 72px; object-fit: contain; display: block; border: 1px dashed rgba(0,0,0,.15); background: #fff; }
     .stamp .lbl { background: rgba(37,99,235,.92); color: #fff; border-radius: 6px; padding: 2px 8px; font-size: 12px; margin-top: 4px; }
@@ -72,8 +73,10 @@
             <span class="muted" id="countHint">已选：0 处</span>
           </div>
           <div class="pdf-wrap" id="pdfWrap">
-            <canvas id="pdfCanvas"></canvas>
-            <div id="overlay"></div>
+            <div id="pdfInner">
+              <canvas id="pdfCanvas"></canvas>
+              <div id="overlay"></div>
+            </div>
           </div>
           <div class="muted mt-2">提示：拖动蓝色标签可微调；红色 × 可删除该点。</div>
         </div>
@@ -226,15 +229,20 @@
 
     function calcScale(){
       const c=document.getElementById('pdfCanvas');
-      const r=c.getBoundingClientRect();
-      dispW=r.width||c.offsetWidth||800;
-      dispH=r.height||c.offsetHeight||1000;
-      const lw=c.width||dispW, lh=c.height||dispH;
-      const d2lX=dispW/lw, d2lY=dispH/lh;
-      const lSX=lw/pdfW, lSY=lh/pdfH;
-      sX=lSX*d2lX; sY=lSY*d2lY;
-      const o=document.getElementById('overlay');
-      o.style.width = r.width+'px'; o.style.height=r.height+'px';
+      dispW = c.clientWidth || c.width || 800;
+      dispH = c.clientHeight || c.height || 1000;
+      sX = dispW / pdfW;
+      sY = dispH / pdfH;
+      const inner = document.getElementById("pdfInner");
+      const o = document.getElementById('overlay');
+      if (inner) {
+        inner.style.width = dispW + "px";
+        inner.style.height = dispH + "px";
+      }
+      if (o) {
+        o.style.width = dispW + "px";
+        o.style.height = dispH + "px";
+      }
     }
     function pdfToScreen(x,y){ calcScale(); return { x: x*sX, y: dispH-(y*sY) }; }
     function screenToPdf(x,y){ calcScale(); return { x: x/sX, y: (dispH-y)/sY }; }
@@ -257,9 +265,8 @@
         let dragging=false, sx0=0, sy0=0, l0=0, t0=0;
         const mm=(e)=>{ if(!dragging) return; e.preventDefault(); d.style.left=(l0+(e.clientX-sx0))+'px'; d.style.top=(t0+(e.clientY-sy0))+'px'; };
         const mu=(e)=>{ if(!dragging) return; dragging=false; document.removeEventListener('mousemove',mm); document.removeEventListener('mouseup',mu);
-          const wrap=document.getElementById('pdfWrap'); const sl=wrap.scrollLeft||0, st=wrap.scrollTop||0;
           const l=parseFloat(d.style.left)||0, t=parseFloat(d.style.top)||0;
-          const pdf=screenToPdf(l+sl, t+st);
+          const pdf=screenToPdf(l, t);
           stampPositions[idx].x = pdf.x; stampPositions[idx].y = pdf.y;
         };
         d.addEventListener('mousedown',(e)=>{ if(e.target.classList.contains('del')) return; dragging=true; sx0=e.clientX; sy0=e.clientY; l0=parseFloat(d.style.left)||0; t0=parseFloat(d.style.top)||0; e.preventDefault(); e.stopPropagation(); document.addEventListener('mousemove',mm,{passive:false}); document.addEventListener('mouseup',mu,{passive:false}); });
@@ -281,6 +288,8 @@
       const vp = page.getViewport({scale});
       const c=document.getElementById('pdfCanvas');
       c.width = vp.width; c.height = vp.height;
+      c.style.width = vp.width + "px";
+      c.style.height = vp.height + "px";
       await page.render({canvasContext: c.getContext('2d'), viewport: vp}).promise;
       calcScale();
       renderStamps();
@@ -300,11 +309,8 @@
     document.getElementById('overlay').addEventListener('click', (e)=>{
       if(!pdfDoc) return;
       if(e.target.closest('.stamp')) return;
-      const c=document.getElementById('pdfCanvas');
-      const r=c.getBoundingClientRect();
-      const wrap=document.getElementById('pdfWrap'); const sl=wrap.scrollLeft||0, st=wrap.scrollTop||0;
-      const sx = (e.clientX - r.left) + sl;
-      const sy = (e.clientY - r.top) + st;
+      const sx = e.offsetX;
+      const sy = e.offsetY;
       const pdf = screenToPdf(sx, sy);
       stampPositions.push({x: pdf.x, y: pdf.y});
       setCount();

@@ -355,6 +355,12 @@ function renderExecutionBlock(it) {
     const wrap = document.getElementById("detailExecutionWrap");
     const el = document.getElementById("detailExecution");
     if (!wrap || !el) return;
+    // 校章：不展示“执行提示”（仅用“结果PDF上传/下载”区块）
+    if (it && it.type === "seal") {
+        wrap.style.display = "none";
+        el.innerHTML = "";
+        return;
+    }
     const ex = it.execute_result;
     if (!ex && !it.executed_at) {
         wrap.style.display = "none";

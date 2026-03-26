@@ -502,8 +502,7 @@ def _execute_approved_queue_item(req: dict) -> dict:
                 "ok": True,
                 "type": t,
                 "id": rid,
-                "skipped": True,
-                "message": "校章为线下盖章流程，不自动调用云联；请按 PDF 与标注位置人工处理。",
+                "message": "已通过",
             }
 
         return {"ok": False, "type": t, "id": rid, "message": f"未知申请类型：{t}"}

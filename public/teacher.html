@@ -60,30 +60,15 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       background: #fff;
     }
+    .q-card { border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; }
+    .q-title { font-weight: 600; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="cardx mb-3">
-      <div class="d-flex align-items-start flex-wrap gap-3">
-        <div class="flex-grow-1" style="min-width: 200px;">
-          <div class="h5 mb-1"><i class="bi bi-chat-square-text"></i> 教师申请</div>
-          <div class="muted mb-0">使用下方标签切换：<strong>快速申请</strong>（一句话解析入队）、<strong>校章申请</strong>（上传 PDF 选点）、<strong>管理中心</strong>。</div>
-        </div>
-        <div class="d-flex flex-column align-items-end gap-1 ms-md-auto">
-          <div class="d-flex gap-2 flex-wrap align-items-center justify-content-end">
-            <span class="muted" id="meHint">未登录</span>
-            <a class="btn btn-outline-secondary btn-sm" id="logoutBtn" href="/auth/logout" style="display:none;"><i class="bi bi-box-arrow-right"></i> 退出</a>
-          </div>
-          <div class="muted small text-end" id="dingtalkEnvHint" style="max-width: 420px;"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="tab-bar" id="teacherTabBar" role="tablist">
     <button type="button" class="tab-btn active" id="tabQuick" data-panel="panelQuick" role="tab" aria-selected="true"><i class="bi bi-lightning-charge"></i> 快速申请</button>
     <button type="button" class="tab-btn" id="tabSeal" data-panel="panelSeal" role="tab" aria-selected="false"><i class="bi bi-patch-check"></i> 校章申请</button>
+    <button type="button" class="tab-btn" id="tabQuestionnaire" data-panel="panelQuestionnaire" role="tab" aria-selected="false"><i class="bi bi-ui-checks-grid"></i> 问卷填写</button>
     <button type="button" class="tab-btn" id="tabAdmin" data-panel="panelAdmin" role="tab" aria-selected="false"><i class="bi bi-speedometer2"></i> 管理中心</button>
   </div>
 
@@ -92,11 +77,11 @@
       <div class="cardx mb-0">
         <div class="mb-2"><b>自然语言申请（解析入队）</b></div>
         <div class="muted small mb-2">
-          用一句话描述需求，解析确认后提交到审批队列。请尽量写全四要素，解析更准确：
+          用一句话描述需求，解析确认后提交到审批队列。支持：添加车牌、周期请假、重置网络密码。请尽量写全四要素，解析更准确：
           <strong>谁</strong>（姓名/对象）、<strong>做什么</strong>（车牌/请假/重置密码等）、<strong>理由或事由</strong>、
           <strong>具体时间或期限</strong>（起止日期、每周哪几天与课节；车牌请写明<strong>临时</strong>或<strong>长期</strong>及授权时长）。
         </div>
-        <textarea id="nlpText" class="form-control" rows="5" placeholder="车牌示例：请为张三添加临时车牌 浙A9X000，授权一年。&#10;请假示例：李四、王五，因科创集训，周一到周五每天晚自习第三节，从今天起约两周。"></textarea>
+        <textarea id="nlpText" class="form-control" rows="5" placeholder="车牌示例：请为张三添加临时车牌 浙A9X000，授权一年。&#10;请假示例：李四、王五，因科创集训，周一到周五每天晚自习第三节，从今天起约两周。&#10;密码示例：请把王五的校园网账号 20201234 密码重置为 Abcd@1234。"></textarea>
         <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
           <button class="btn btn-primary" id="parseBtn"><i class="bi bi-magic"></i> 解析</button>
           <div id="status" class="muted"></div>
@@ -107,6 +92,24 @@
     <div class="teacher-panel" id="panelSeal" role="tabpanel" aria-labelledby="tabSeal">
       <iframe id="sealFrame" class="teacher-seal-frame" src="" title="校章申请" frameborder="0"></iframe>
       <div class="muted small mt-2">提示：校章申请在本页内完成，无需跳转外部浏览器。</div>
+    </div>
+
+    <div class="teacher-panel" id="panelQuestionnaire" role="tabpanel" aria-labelledby="tabQuestionnaire">
+      <div class="cardx mb-3">
+        <div class="fw-semibold mb-2"><i class="bi bi-person-vcard"></i> 身份验证（仅问卷）</div>
+        <div class="muted small mb-2">管理员在 TeacherDataSystem 发起问卷后，教师在主站这里完成填写。请输入身份证号与手机号拉取本人问卷。</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4"><label class="form-label small text-muted">身份证号</label><input id="qAuthIdNumber" class="form-control form-control-sm" /></div>
+          <div class="col-md-4"><label class="form-label small text-muted">手机号</label><input id="qAuthPhone" class="form-control form-control-sm" /></div>
+          <div class="col-md-4 d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-sm" id="qAuthBtn"><i class="bi bi-search"></i> 拉取我的问卷</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="qRefreshBtn">刷新</button>
+          </div>
+        </div>
+        <div class="muted small mt-2" id="qAuthHint"></div>
+      </div>
+      <div id="qListWrap"></div>
+      <div class="muted small mt-2">若主站暂时不可用，可<a href="/go/teacher-questionnaire" target="_blank" rel="noopener">点此打开原版教师问卷页</a>。</div>
     </div>
 
     <div class="teacher-panel" id="panelAdmin" role="tabpanel" aria-labelledby="tabAdmin">
@@ -536,6 +539,7 @@
       const panels = {
         panelQuick: document.getElementById("panelQuick"),
         panelSeal: document.getElementById("panelSeal"),
+        panelQuestionnaire: document.getElementById("panelQuestionnaire"),
         panelAdmin: document.getElementById("panelAdmin"),
       };
       const sealFrame = document.getElementById("sealFrame");
@@ -560,6 +564,9 @@
             sealFrame.src = "/seal.html?embed=1";
             sealFrameLoaded = true;
           }
+          if (pid === "panelQuestionnaire") {
+            tryAutoAuthQuestionnaires();
+          }
           if (pid === "panelAdmin" && !adminFrameLoaded) {
             adminFrame.src = "/index.html?embed=1";
             adminFrameLoaded = true;
@@ -575,6 +582,7 @@
         const d = await r.json().catch(()=>({}));
         const hint = document.getElementById("meHint");
         const logoutBtn = document.getElementById("logoutBtn");
+        if (!hint || !logoutBtn) return;
         if (d && d.logged_in && d.user) {
           const u = d.user;
           hint.textContent = "已登录：" + (u.summary || u.display_name || u.name || u.nick || u.userId || "未知");
@@ -768,10 +776,169 @@
       }
     }
 
+    const API_Q_AUTO_AUTH = "/api/teacher-questionnaires/auto-auth";
+    const API_Q_AUTH = "/api/teacher-questionnaires/auth";
+    const API_Q_SUBMIT = "/api/teacher-questionnaires/submit";
+    let qAuth = { id_number: "", phone: "" };
+    let questionnaireAutoTried = false;
+
+    function qEsc(s) { return escHtml(s == null ? "" : String(s)); }
+
+    function renderQList(items) {
+      const wrap = document.getElementById("qListWrap");
+      if (!wrap) return;
+      if (!Array.isArray(items) || !items.length) {
+        wrap.innerHTML = '<div class="cardx"><div class="muted">暂无待填问卷。</div></div>';
+        return;
+      }
+      wrap.innerHTML = items.map(function (q) {
+        const fields = Array.isArray(q.fields) ? q.fields : [];
+        const answers = (q.response && q.response.answers && typeof q.response.answers === "object") ? q.response.answers : {};
+        let formHtml = fields.map(function (f) {
+          const name = String(f.name || "").trim();
+          const label = String(f.label || name || "字段");
+          const type = String(f.type || "text").toLowerCase();
+          const req = !!f.required;
+          const v = answers[name] == null ? "" : String(answers[name]);
+          const reqMark = req ? '<span class="text-danger">*</span>' : '';
+          if (type === "select" && Array.isArray(f.options) && f.options.length) {
+            const opts = f.options.map(function (op) {
+              const val = String(op);
+              const sel = val === v ? " selected" : "";
+              return '<option value="' + qEsc(val) + '"' + sel + '>' + qEsc(val) + '</option>';
+            }).join("");
+            return '<div class="mb-2"><label class="form-label small">' + qEsc(label) + reqMark + '</label><select class="form-select form-select-sm" data-q-field="' + qEsc(name) + '" ' + (req ? 'required' : '') + '><option value="">请选择</option>' + opts + '</select></div>';
+          }
+          if (type === "textarea") {
+            return '<div class="mb-2"><label class="form-label small">' + qEsc(label) + reqMark + '</label><textarea class="form-control form-control-sm" rows="3" data-q-field="' + qEsc(name) + '" ' + (req ? 'required' : '') + '>' + qEsc(v) + '</textarea></div>';
+          }
+          const inputType = (type === "number" || type === "date") ? type : "text";
+          return '<div class="mb-2"><label class="form-label small">' + qEsc(label) + reqMark + '</label><input class="form-control form-control-sm" type="' + inputType + '" data-q-field="' + qEsc(name) + '" value="' + qEsc(v) + '" ' + (req ? 'required' : '') + ' /></div>';
+        }).join("");
+        const status = q.response && q.response.status ? String(q.response.status) : "pending";
+        return '<div class="q-card" data-qid="' + q.id + '">'
+          + '<div class="d-flex justify-content-between align-items-center mb-2"><div class="q-title">' + qEsc(q.title) + '</div><span class="badge text-bg-secondary">' + qEsc(status) + '</span></div>'
+          + (q.description ? '<div class="muted small mb-2">' + qEsc(q.description) + '</div>' : '')
+          + '<div>' + formHtml + '</div>'
+          + '<div class="d-flex align-items-center gap-2 mt-2"><button type="button" class="btn btn-success btn-sm" data-q-submit="' + q.id + '"><i class="bi bi-send"></i> 提交本问卷</button><span class="muted small" id="qSubmitHint_' + q.id + '"></span></div>'
+          + '</div>';
+      }).join("");
+      wrap.querySelectorAll("[data-q-submit]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const qid = parseInt(btn.getAttribute("data-q-submit"), 10);
+          submitOneQuestionnaire(qid);
+        });
+      });
+    }
+
+    async function loadMyQuestionnaires() {
+      const hint = document.getElementById("qAuthHint");
+      const wrap = document.getElementById("qListWrap");
+      if (!qAuth.id_number || !qAuth.phone) {
+        if (hint) hint.textContent = "请先填写身份证号和手机号。";
+        if (wrap) wrap.innerHTML = "";
+        return;
+      }
+      if (hint) hint.textContent = "加载中…";
+      if (wrap) wrap.innerHTML = '<div class="cardx"><div class="muted">加载中…</div></div>';
+      try {
+        const r = await fetch(API_Q_AUTH, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(qAuth)
+        });
+        const d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d.ok) throw new Error(d.msg || d.detail || r.status);
+        if (hint) hint.textContent = "已加载：" + (d.teacher_name || "教师") + "，共 " + ((d.questionnaires || []).length) + " 份";
+        renderQList(d.questionnaires || []);
+      } catch (e) {
+        if (hint) hint.textContent = "加载失败";
+        if (wrap) wrap.innerHTML = '<div class="cardx text-danger">加载失败：' + qEsc(e.message || e) + '</div>';
+      }
+    }
+
+    async function tryAutoAuthQuestionnaires() {
+      const hint = document.getElementById("qAuthHint");
+      if (questionnaireAutoTried) return;
+      questionnaireAutoTried = true;
+      if (hint) hint.textContent = "尝试自动识别教师身份…";
+      try {
+        const r = await fetch(API_Q_AUTO_AUTH, { credentials: "same-origin" });
+        const d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d.ok) throw new Error(d.msg || d.detail || r.status);
+        const ap = d.auth_prefill || {};
+        qAuth.id_number = String(ap.id_number || "").trim();
+        qAuth.phone = String(ap.phone || "").trim();
+        const idInp = document.getElementById("qAuthIdNumber");
+        const phInp = document.getElementById("qAuthPhone");
+        if (idInp && qAuth.id_number) idInp.value = qAuth.id_number;
+        if (phInp && qAuth.phone) phInp.value = qAuth.phone;
+        if (hint) hint.textContent = "已自动识别：" + (d.teacher_name || "教师") + "，共 " + ((d.questionnaires || []).length) + " 份";
+        renderQList(d.questionnaires || []);
+      } catch (e) {
+        let txt = "自动识别失败，请手动填写身份证号和手机号后拉取问卷。";
+        try {
+          const raw = String((e && e.message) || e || "");
+          if (raw.indexOf("手机号在教师库匹配到多条记录") >= 0) txt = "自动识别失败：手机号匹配到多条教师记录，请手动验证身份。";
+          else if (raw.indexOf("姓名在教师库匹配到多条记录") >= 0) txt = "自动识别失败：姓名匹配到多条教师记录，请手动验证身份。";
+          else if (raw.indexOf("未在教师库匹配到") >= 0) txt = "自动识别失败：教师库无匹配记录，请手动验证身份。";
+        } catch (_) {}
+        if (hint) hint.textContent = txt;
+      }
+    }
+
+    async function submitOneQuestionnaire(qid) {
+      const card = document.querySelector('.q-card[data-qid="' + qid + '"]');
+      if (!card) return;
+      const hint = document.getElementById("qSubmitHint_" + qid);
+      const answers = {};
+      let missing = "";
+      card.querySelectorAll("[data-q-field]").forEach(function (el) {
+        const k = String(el.getAttribute("data-q-field") || "").trim();
+        const v = (el.value || "").trim();
+        if (!k) return;
+        if (el.hasAttribute("required") && !v && !missing) missing = k;
+        answers[k] = v;
+      });
+      if (missing) {
+        if (hint) hint.textContent = "请先填写必填项";
+        return;
+      }
+      if (hint) hint.textContent = "提交中…";
+      try {
+        const r = await fetch(API_Q_SUBMIT, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            id_number: qAuth.id_number,
+            phone: qAuth.phone,
+            questionnaire_id: qid,
+            answers: answers
+          })
+        });
+        const d = await r.json().catch(function () { return {}; });
+        if (!r.ok || !d.ok) throw new Error(d.msg || d.detail || r.status);
+        if (hint) hint.textContent = "已提交";
+        await loadMyQuestionnaires();
+      } catch (e) {
+        if (hint) hint.textContent = "提交失败：" + (e.message || e);
+      }
+    }
+
     document.getElementById("parseBtn").addEventListener("click", parseNlp);
     document.getElementById("enqueueBtn").addEventListener("click", enqueue);
     const refreshBtn = document.getElementById("refreshMyReqBtn");
     if (refreshBtn) refreshBtn.addEventListener("click", loadMyRequests);
+    const qAuthBtn = document.getElementById("qAuthBtn");
+    if (qAuthBtn) qAuthBtn.addEventListener("click", function () {
+      qAuth.id_number = (document.getElementById("qAuthIdNumber").value || "").trim();
+      qAuth.phone = (document.getElementById("qAuthPhone").value || "").trim();
+      loadMyQuestionnaires();
+    });
+    const qRefreshBtn = document.getElementById("qRefreshBtn");
+    if (qRefreshBtn) qRefreshBtn.addEventListener("click", loadMyQuestionnaires);
     initTeacherTabs();
     loadMe();
     loadMyRequests();

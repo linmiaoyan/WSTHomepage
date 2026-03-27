@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>管理中心 · 审批 / 教师数据 / 问卷</title>
+    <title>管理中心 · 审批 / 原版子系统</title>
     <link rel="stylesheet" href="css/bootstrap.min.css" />
     <link rel="stylesheet" href="css/common.css" />
     <link rel="stylesheet" href="css/bootstrap-icons.css" />
@@ -121,7 +121,17 @@
             align-items: center;
             gap: 6px;
         }
+        .portal-hint {
+            max-width: 1000px;
+            margin: 12px auto 0;
+            padding: 0 20px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
         body.embed-mode .top-navbar {
+            display: none;
+        }
+        body.embed-mode .portal-hint {
             display: none;
         }
         body.embed-mode .tab-bar {
@@ -132,22 +142,26 @@
 <body>
     <nav class="top-navbar">
         <div class="nav-container">
-            <a class="nav-link" href="home.html"><i class="bi bi-house-door"></i> 门户首页</a>
             <a class="nav-link active" href="index.html"><i class="bi bi-speedometer2"></i> 管理中心</a>
+            <a class="nav-link" href="teacher.html"><i class="bi bi-chat-square-text"></i> 教师申请</a>
         </div>
     </nav>
 
+    <div class="portal-hint">
+        一句话示例：<span class="mono">张XX 浙A12223 开三个月</span>。教师从 <a href="teacher.html">教师申请</a> 进入快速申请/校章申请；管理员在本页处理审批与原版子系统入口。
+    </div>
+
     <div class="tab-bar" id="tabBar" style="display:none;">
-        <div class="tab-row-label">审批（按类型分标签）</div>
+        <div class="tab-row-label">审批队列</div>
         <button type="button" class="tab-btn active" data-page="/pages/admin-review.html"><i class="bi bi-inboxes"></i> 全部待办</button>
         <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=add_vehicle"><i class="bi bi-car-front"></i> 审批 · 车牌</button>
         <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=leave_cycle"><i class="bi bi-calendar2-week"></i> 审批 · 周期请假</button>
         <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=reset_net_password"><i class="bi bi-key"></i> 审批 · 网络密码</button>
         <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=seal"><i class="bi bi-patch-check"></i> 审批 · 校章</button>
 
-        <div class="tab-row-label">原版子系统（新标签打开，与主站端口不同）</div>
-        <a class="tab-btn tab-external" href="/go/quickvote" target="_blank" rel="noopener"><i class="bi bi-qr-code"></i> 民主测评 QuickVote</a>
-        <a class="tab-btn tab-external" href="/go/teacher-data-system" target="_blank" rel="noopener"><i class="bi bi-database"></i> 教师数据系统</a>
+        <div class="tab-row-label">原版子系统</div>
+        <a class="tab-btn tab-external" href="/go/quickvote" target="_blank" rel="noopener"><i class="bi bi-qr-code"></i> 原版 QuickVote</a>
+        <a class="tab-btn tab-external" href="/go/teacher-data-system" target="_blank" rel="noopener"><i class="bi bi-database"></i> 原版 TeacherDataSystem</a>
 
         <div class="tab-row-label">快捷操作</div>
         <button type="button" class="tab-btn" data-page="/pages/add-vehicle.html"><i class="bi bi-plus-circle"></i> 添加职工车牌</button>
@@ -161,7 +175,7 @@
 
     <div class="gate-overlay" id="gate">
         <div class="gate-card">
-            <div class="gate-title">访问口令验证</div>
+            <div class="gate-title">访问口令校验</div>
             <div class="gate-desc">请输入本页专用口令后继续访问。</div>
             <input type="password" id="gateCode" class="gate-input" placeholder="请输入访问口令" />
             <button type="button" id="gateBtn" class="gate-btn">进入管理中心</button>
@@ -218,8 +232,6 @@
                         unlock();
                         return;
                     }
-                    // 已启用口令：必须向后端校验成功以写入管理员会话（否则审核接口会 401）。
-                    // 不再用 localStorage 绕过，避免“界面解锁了但接口仍无权限”。
                     try {
                         if (window.localStorage) localStorage.removeItem(STORAGE_KEY);
                     } catch (e) {}

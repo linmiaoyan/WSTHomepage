@@ -101,12 +101,10 @@
                         <textarea id="reviewComment" class="form-control" rows="2" placeholder="例如：信息不全，请补充…"></textarea>
                     </div>
                 <div class="mt-3" id="sealResultWrap" style="display:none;">
-                    <div class="fw-semibold mb-1"><i class="bi bi-file-earmark-arrow-up"></i> 校章结果文件（盖章后 PDF）</div>
-                    <div class="muted small mb-2">管理员通过审批前请先上传盖章后的 PDF。上传后教师端可在「我的校章申请」直接下载。</div>
+                    <div class="fw-semibold mb-1"><i class="bi bi-file-earmark-pdf"></i> 校章结果文件（系统自动生成）</div>
+                    <div class="muted small mb-2">点击“通过”后系统会按标注位置自动盖章并生成结果 PDF，教师端可直接下载。</div>
                     <div class="d-flex flex-wrap align-items-center gap-2">
-                        <input type="file" class="form-control form-control-sm" id="sealResultFile" accept="application/pdf" style="max-width:260px;" />
-                        <button type="button" class="btn btn-sm btn-primary" id="sealResultUploadBtn">上传结果 PDF</button>
-                        <a href="#" class="btn btn-sm btn-outline-secondary" id="sealResultDownloadLink" style="display:none;" target="_blank" rel="noopener">打开已上传结果</a>
+                        <a href="#" class="btn btn-sm btn-outline-secondary" id="sealResultDownloadLink" style="display:none;" target="_blank" rel="noopener">打开自动生成结果</a>
                         <span class="muted small" id="sealResultHint"></span>
                     </div>
                 </div>
@@ -398,11 +396,11 @@ function updateSealResultUI(it) {
     if (url) {
         link.style.display = "";
         link.href = url;
-        hint.textContent = "（已上传结果文件）";
+        hint.textContent = "（已生成）";
     } else {
         link.style.display = "none";
         link.href = "#";
-        hint.textContent = "（尚未上传）";
+        hint.textContent = "（待审批通过后自动生成）";
     }
 }
 
@@ -502,20 +500,6 @@ async function review(approved) {
     if (!currentDetail) return;
     const comment = (document.getElementById("reviewComment").value || "").trim();
     try {
-        if (approved && currentDetail.type === "seal") {
-            // 校章：强制要求先上传盖章后 PDF（否则教师端无法下载）
-            const ex = currentDetail.execute_result;
-            const hasUrl = ex && typeof ex === "object" && (ex.stamped_pdf_url || ex.stampedPdfUrl);
-            if (!hasUrl) {
-                const inp = document.getElementById("sealResultFile");
-                const f = inp && inp.files && inp.files[0];
-                if (!f) {
-                    alert("校章通过前请先上传盖章后的 PDF。");
-                    return;
-                }
-                await uploadSealResultPdf(currentDetail.id, f);
-            }
-        }
         const r = await fetch(API_REVIEW(currentDetail.id), {
             method: "POST",
             credentials: "same-origin",
@@ -531,29 +515,18 @@ async function review(approved) {
         if (approved && currentDetail.type !== "seal" && d.execution && d.execution.message) {
             alert("已通过并已尝试执行。\n\n" + d.execution.message);
         }
+        if (approved && currentDetail.type === "seal" && d.execution && d.execution.stamped_pdf_url) {
+            alert(
+                "已通过，系统已自动生成盖章后 PDF。\n\n下载链接："
+                + d.execution.stamped_pdf_url
+                + "\n\n教师端刷新「我的校章申请」后可直接下载。"
+            );
+        }
         modal.hide();
         await loadList();
     } catch (e) {
         alert("操作失败：" + e.message);
     }
-}
-
-async function uploadSealResultPdf(rid, fileObj) {
-    const hint = document.getElementById("sealResultHint");
-    if (hint) hint.textContent = "上传中…";
-    const fd = new FormData();
-    fd.append("pdf", fileObj);
-    const r = await fetch("/api/admin/requests/" + rid + "/seal-result", { method: "POST", credentials: "same-origin", body: fd });
-    const d = await r.json().catch(() => ({}));
-    if (r.status === 401 && d && d.need_admin_gate) {
-        throw new Error("无权限：请先通过管理中心口令");
-    }
-    if (!r.ok || !d.ok) throw new Error(d.msg || r.status);
-    // 写回 currentDetail 的 execute_result，便于后续 review() 继续
-    if (!currentDetail.execute_result || typeof currentDetail.execute_result !== "object") currentDetail.execute_result = {};
-    currentDetail.execute_result.stamped_pdf_url = d.url;
-    updateSealResultUI(currentDetail);
-    if (hint) hint.textContent = "已上传";
 }
 
 document.getElementById("refreshBtn").addEventListener("click", loadList);
@@ -562,24 +535,6 @@ document.getElementById("approveBtn").addEventListener("click", () => review(tru
 document.getElementById("rejectBtn").addEventListener("click", () => review(false));
 const btnPrefillVehicle = document.getElementById("btnOpenAddVehiclePrefill");
 if (btnPrefillVehicle) btnPrefillVehicle.addEventListener("click", gotoAddVehicleFromRequest);
-
-const sealUploadBtn = document.getElementById("sealResultUploadBtn");
-if (sealUploadBtn) {
-    sealUploadBtn.addEventListener("click", async function () {
-        if (!currentDetail || currentDetail.type !== "seal") return;
-        const inp = document.getElementById("sealResultFile");
-        const f = inp && inp.files && inp.files[0];
-        if (!f) {
-            alert("请先选择盖章后 PDF 文件");
-            return;
-        }
-        try {
-            await uploadSealResultPdf(currentDetail.id, f);
-        } catch (e) {
-            alert("上传失败：" + e.message);
-        }
-    });
-}
 
 (function initSealStampAdmin() {
     if (TYPE_FILTER !== "seal") return;

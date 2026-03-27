@@ -12,7 +12,7 @@ import re
 import time
 import sqlite3
 import uuid
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 
 
 def _env_here() -> str:
@@ -112,54 +112,6 @@ def _init_queue_db():
 _init_queue_db()
 
 
-def _init_portal_db():
-    """教师数据填报 + 问卷（QuickVote）表，与 keadmin_queue.db 同库，便于单进程备份。"""
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS teacher_records (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              dept TEXT,
-              mobile TEXT,
-              email TEXT,
-              subjects TEXT,
-              remark TEXT,
-              payload_json TEXT,
-              created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS quickvote_surveys (
-              id TEXT PRIMARY KEY,
-              title TEXT NOT NULL,
-              definition_json TEXT NOT NULL,
-              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS quickvote_responses (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              survey_id TEXT NOT NULL,
-              answers_json TEXT NOT NULL,
-              submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
-              FOREIGN KEY (survey_id) REFERENCES quickvote_surveys(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_qv_resp_survey ON quickvote_responses(survey_id);
-            CREATE TABLE IF NOT EXISTS migrate_log (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              source_path TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              rows_imported INTEGER NOT NULL DEFAULT 0,
-              note TEXT,
-              imported_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-_init_portal_db()
 
 
 def _now_iso():
@@ -211,6 +163,24 @@ def _admin_api_denied_response():
         "need_admin_gate": True,
         "msg": "需要先在「管理中心」父页面输入正确访问口令，或刷新后重新进入管理中心。",
     }), 401
+
+
+def _campus_verify_tls() -> bool:
+    """
+    校园网管接口证书校验开关：
+    - CAMPUS_VERIFY_TLS=1/true/on/yes -> 校验证书
+    - 其他（默认）-> 不校验（适配内网自签证书）
+    """
+    return str(_env_get("CAMPUS_VERIFY_TLS", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _campus_cfg_from_request(data: dict) -> tuple:
+    """支持前端临时覆盖 base/csrf；未传则回退 .env 配置。"""
+    if not isinstance(data, dict):
+        data = {}
+    base = str(data.get("baseUrl") or data.get("base_url") or "").strip() or CAMPUS_BASE
+    token = str(data.get("csrfToken") or data.get("csrf_token") or "").strip() or CAMPUS_TOKEN
+    return base.rstrip("/"), token
 
 
 def _row_to_req(row):
@@ -498,12 +468,7 @@ def _execute_approved_queue_item(req: dict) -> dict:
             }
 
         if t == "seal":
-            return {
-                "ok": True,
-                "type": t,
-                "id": rid,
-                "message": "已通过",
-            }
+            return _auto_generate_seal_result_pdf(req)
 
         return {"ok": False, "type": t, "id": rid, "message": f"未知申请类型：{t}"}
     except Exception as e:
@@ -605,6 +570,103 @@ def api_admin_seal_stamp():
     return jsonify({"ok": True, "url": _u})
 
 
+def _safe_upload_path_from_url(u: str) -> str:
+    s = str(u or "").strip()
+    if not s.startswith("/uploads/"):
+        return ""
+    name = s[len("/uploads/") :].strip().replace("\\", "/")
+    if not name or "/" in name:
+        return ""
+    p = os.path.join(UPLOADS_DIR, name)
+    if not os.path.isfile(p):
+        return ""
+    return p
+
+
+def _auto_generate_seal_result_pdf(req: dict) -> dict:
+    """
+    按申请中 positions 与当前校章图自动生成盖章后 PDF。
+    依赖 PyMuPDF(fitz)；成功后返回 stamped_pdf_url。
+    """
+    rid = req.get("id")
+    p = req.get("params") or {}
+    if not isinstance(p, dict):
+        p = {}
+    src_path = _safe_upload_path_from_url(p.get("pdf_url"))
+    if not src_path:
+        return {"ok": False, "type": "seal", "id": rid, "message": "原始 PDF 不存在或路径无效"}
+    positions = p.get("positions")
+    if not isinstance(positions, list) or not positions:
+        return {"ok": False, "type": "seal", "id": rid, "message": "缺少盖章位置（positions）"}
+    stamp_path, _stamp_url = _seal_stamp_upload_path_and_url()
+    if not stamp_path:
+        return {"ok": False, "type": "seal", "id": rid, "message": "尚未上传校章图片，请管理员先在校章审核页上传校章图"}
+
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return {"ok": False, "type": "seal", "id": rid, "message": "服务器缺少 PyMuPDF，无法自动生成盖章 PDF"}
+
+    out_name = _seal_result_filename(int(rid or 0))
+    out_path = os.path.join(UPLOADS_DIR, out_name)
+    doc = None
+    try:
+        doc = fitz.open(src_path)
+        if doc.page_count < 1:
+            return {"ok": False, "type": "seal", "id": rid, "message": "原始 PDF 页数异常"}
+        page = doc.load_page(0)
+        page_h = float(page.rect.height)
+
+        # 以 72pt 为基准边长，按图片长宽比缩放
+        pix = fitz.Pixmap(stamp_path)
+        iw = float(max(1, pix.width))
+        ih = float(max(1, pix.height))
+        pix = None
+        base = 72.0
+        if iw >= ih:
+            sw = base
+            sh = base * (ih / iw)
+        else:
+            sh = base
+            sw = base * (iw / ih)
+
+        placed = 0
+        for it in positions:
+            if not isinstance(it, dict):
+                continue
+            try:
+                x = float(it.get("x"))
+                y = float(it.get("y"))
+            except (TypeError, ValueError):
+                continue
+            # 前端 y 为 PDF 底部坐标系；fitz 以左上为原点
+            left = x
+            top = page_h - y - sh
+            rect = fitz.Rect(left, top, left + sw, top + sh)
+            page.insert_image(rect, filename=stamp_path, keep_proportion=True, overlay=True)
+            placed += 1
+
+        if placed < 1:
+            return {"ok": False, "type": "seal", "id": rid, "message": "positions 无有效坐标，未生成结果文件"}
+
+        doc.save(out_path, garbage=4, deflate=True)
+        return {
+            "ok": True,
+            "type": "seal",
+            "id": rid,
+            "stamped_pdf_url": f"/uploads/{out_name}",
+            "message": f"已自动生成盖章 PDF（共 {placed} 处）",
+        }
+    except Exception as e:
+        return {"ok": False, "type": "seal", "id": rid, "message": f"自动盖章失败：{e}"}
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+
 @app.route('/api/admin-gate-status', methods=['GET'])
 def api_admin_gate_status():
     """是否启用管理中心口令（由 .env 的 ADMIN_GATE_CODE 是否非空决定）。"""
@@ -645,6 +707,321 @@ def go_teacher_data_system():
         return redirect("/index.html", code=302)
     u = (_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002")
     return redirect(u, code=302)
+
+
+@app.route("/go/teacher-questionnaire")
+def go_teacher_questionnaire():
+    """
+    教师问卷入口（主站统一入口）。
+    默认跳到 TeacherDataSystem 的教师看板；可在 .env 配置 TEACHERDATA_QUESTIONNAIRE_PATH 覆盖路径。
+    """
+    base = (_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002").rstrip("/") + "/"
+    p = (_env_get("TEACHERDATA_QUESTIONNAIRE_PATH", "/teacher/dashboard").strip() or "/teacher/dashboard")
+    if not p.startswith("/"):
+        p = "/" + p
+    u = urljoin(base, p.lstrip("/"))
+    return redirect(u, code=302)
+
+
+def _teacherdata_base_url() -> str:
+    return ((_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002")).rstrip("/")
+
+
+def _teacherdata_root_dir() -> str:
+    r = (_env_get("TEACHERDATA_ROOT", "").strip())
+    if r:
+        if os.path.isabs(r):
+            return r
+        return os.path.join(BASE_DIR, r)
+    return os.path.join(BASE_DIR, "vendor", "TeacherDataSystem")
+
+
+def _teacherdata_db_path() -> str:
+    return os.path.join(_teacherdata_root_dir(), "teacher_data.db")
+
+
+def _teacherdata_login(id_number: str, phone: str) -> dict:
+    if not id_number or not phone:
+        return {"ok": False, "msg": "id_number 或 phone 为空"}
+    u = _teacherdata_base_url() + "/api/teacher/login"
+    try:
+        r = requests.post(
+            u,
+            json={"id_number": id_number, "phone": phone},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        return {"ok": False, "msg": f"TeacherDataSystem 连接失败：{e}"}
+    try:
+        d = r.json()
+    except Exception:
+        d = {"detail": (r.text or "")[:300]}
+    if r.status_code >= 400:
+        return {"ok": False, "msg": str(d.get("detail") or d.get("msg") or r.status_code)}
+    token = str(d.get("token") or "").strip()
+    tid = d.get("teacher_id")
+    if not token or tid is None:
+        return {"ok": False, "msg": "TeacherDataSystem 登录返回不完整"}
+    return {
+        "ok": True,
+        "token": token,
+        "teacher_id": int(tid),
+        "teacher_name": str(d.get("teacher_name") or ""),
+    }
+
+
+def _teacherdata_questionnaires_for_teacher(teacher_id: int) -> list:
+    dbp = _teacherdata_db_path()
+    if not os.path.isfile(dbp):
+        raise FileNotFoundError(f"未找到 TeacherDataSystem 数据库：{dbp}")
+    tid = int(teacher_id)
+    out = []
+    conn = sqlite3.connect(dbp)
+    conn.row_factory = sqlite3.Row
+    try:
+        q_rows = conn.execute("SELECT id, title, description, fields, teacher_ids, status, deadline FROM questionnaires ORDER BY id DESC").fetchall()
+        r_rows = conn.execute(
+            "SELECT questionnaire_id, answers, status, submitted_at FROM questionnaire_responses WHERE teacher_id=?",
+            (tid,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    resp_map = {}
+    for rr in r_rows:
+        try:
+            ans = json.loads(rr["answers"] or "{}")
+        except Exception:
+            ans = {}
+        resp_map[int(rr["questionnaire_id"])] = {
+            "answers": ans if isinstance(ans, dict) else {},
+            "status": str(rr["status"] or "pending"),
+            "submitted_at": rr["submitted_at"],
+        }
+
+    for q in q_rows:
+        if str(q["status"] or "") not in ("active", "pending", "open"):
+            continue
+        try:
+            tids = json.loads(q["teacher_ids"] or "[]")
+        except Exception:
+            tids = []
+        ids = []
+        if isinstance(tids, list):
+            for x in tids:
+                try:
+                    ids.append(int(x))
+                except (TypeError, ValueError):
+                    continue
+        if tid not in ids:
+            continue
+        try:
+            fields = json.loads(q["fields"] or "[]")
+        except Exception:
+            fields = []
+        out.append({
+            "id": int(q["id"]),
+            "title": str(q["title"] or ""),
+            "description": str(q["description"] or ""),
+            "fields": fields if isinstance(fields, list) else [],
+            "status": str(q["status"] or ""),
+            "deadline": q["deadline"],
+            "response": resp_map.get(int(q["id"]), {"answers": {}, "status": "pending", "submitted_at": None}),
+        })
+    return out
+
+
+def _norm_phone_tail11(s: str) -> str:
+    t = "".join(ch for ch in str(s or "") if ch.isdigit())
+    if len(t) >= 11:
+        return t[-11:]
+    return t
+
+
+def _teacherdata_resolve_teacher_by_dingtalk_user(me: dict) -> dict:
+    """
+    从主站钉钉登录信息自动匹配 TeacherDataSystem 教师（优先手机号，其次姓名）。
+    成功返回 {id, name, id_number, phone}。
+    """
+    if not isinstance(me, dict):
+        return {"ok": False, "reason": "no_dingtalk_profile", "msg": "缺少钉钉用户资料"}
+    mobile_candidates = []
+    for k in ("mobile", "telephone", "phone"):
+        v = str(me.get(k) or "").strip()
+        if v:
+            mobile_candidates.append(v)
+    mobile_norm_set = {x for x in (_norm_phone_tail11(v) for v in mobile_candidates) if x}
+
+    name_candidates = []
+    for k in ("name", "display_name", "nick", "summary"):
+        v = str(me.get(k) or "").strip()
+        if v:
+            name_candidates.append(v)
+    if name_candidates and "·" in name_candidates[-1]:
+        # summary 形如 “张三 · 13xxxx · 钉钉userId:xxx”
+        name_candidates.append(name_candidates[-1].split("·", 1)[0].strip())
+    name_set = {n for n in name_candidates if n and not n.startswith("钉钉userId:")}
+
+    dbp = _teacherdata_db_path()
+    if not os.path.isfile(dbp):
+        return {"ok": False, "reason": "teacher_db_missing", "msg": f"未找到教师库：{dbp}"}
+    conn = sqlite3.connect(dbp)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("SELECT id, name, id_number, phone FROM teachers").fetchall()
+    finally:
+        conn.close()
+    cand = []
+    for r in rows:
+        phone = str(r["phone"] or "").strip()
+        idn = str(r["id_number"] or "").strip()
+        if not phone or not idn:
+            continue
+        p11 = _norm_phone_tail11(phone)
+        by_mobile = bool(p11 and p11 in mobile_norm_set)
+        by_name = bool(str(r["name"] or "").strip() in name_set)
+        if by_mobile or by_name:
+            cand.append({
+                "id": int(r["id"]),
+                "name": str(r["name"] or ""),
+                "id_number": idn,
+                "phone": phone,
+                "_by_mobile": by_mobile,
+                "_by_name": by_name,
+            })
+    if not cand:
+        return {"ok": False, "reason": "no_match", "msg": "未在教师库匹配到该钉钉用户"}
+    by_mobile = [x for x in cand if x.get("_by_mobile")]
+    if len(by_mobile) == 1:
+        r = dict(by_mobile[0])
+        r["ok"] = True
+        return r
+    if len(by_mobile) > 1:
+        both = [x for x in by_mobile if x.get("_by_name")]
+        if len(both) == 1:
+            r = dict(both[0])
+            r["ok"] = True
+            return r
+        return {
+            "ok": False,
+            "reason": "mobile_multi_match",
+            "msg": "手机号在教师库匹配到多条记录，无法自动确定",
+            "candidates": [{"id": x.get("id"), "name": x.get("name")} for x in by_mobile[:8]],
+        }
+    # 无手机号命中时，仅姓名唯一才接受
+    by_name = [x for x in cand if x.get("_by_name")]
+    if len(by_name) == 1:
+        r = dict(by_name[0])
+        r["ok"] = True
+        return r
+    if len(by_name) > 1:
+        return {
+            "ok": False,
+            "reason": "name_multi_match",
+            "msg": "姓名在教师库匹配到多条记录，无法自动确定",
+            "candidates": [{"id": x.get("id"), "name": x.get("name")} for x in by_name[:8]],
+        }
+    return {"ok": False, "reason": "no_match", "msg": "未在教师库匹配到该钉钉用户"}
+
+
+@app.route("/api/teacher-questionnaires/auth", methods=["POST"])
+def api_teacher_questionnaires_auth():
+    """
+    主站问卷入口：教师用身份证+手机号验证后，返回其待填问卷（来自 TeacherDataSystem）。
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    id_number = str(data.get("id_number") or data.get("idNumber") or "").strip()
+    phone = str(data.get("phone") or "").strip()
+    lg = _teacherdata_login(id_number, phone)
+    if not lg.get("ok"):
+        return jsonify({"ok": False, "msg": lg.get("msg") or "身份验证失败"}), 401
+
+    try:
+        out = _teacherdata_questionnaires_for_teacher(int(lg["teacher_id"]))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+    return jsonify({
+        "ok": True,
+        "teacher_id": int(lg["teacher_id"]),
+        "teacher_name": lg.get("teacher_name") or "",
+        "questionnaires": out,
+    })
+
+
+@app.route("/api/teacher-questionnaires/auto-auth", methods=["GET"])
+def api_teacher_questionnaires_auto_auth():
+    """
+    主站登录态自动匹配教师问卷身份：优先按钉钉手机号，辅以姓名；匹配成功则直接返回问卷列表。
+    """
+    me = web_session.get("dt_user")
+    if not me:
+        return jsonify({"ok": False, "need_login": True, "msg": "need_dingtalk_login"}), 401
+    t = _teacherdata_resolve_teacher_by_dingtalk_user(me)
+    if not t.get("ok"):
+        return jsonify({
+            "ok": False,
+            "need_manual_auth": True,
+            "reason": t.get("reason") or "no_match",
+            "msg": t.get("msg") or "未能自动匹配教师，请手动填写身份证号和手机号",
+            "candidates": t.get("candidates") or [],
+        }), 404
+    lg = _teacherdata_login(str(t.get("id_number") or ""), str(t.get("phone") or ""))
+    if not lg.get("ok"):
+        return jsonify({"ok": False, "need_manual_auth": True, "msg": lg.get("msg") or "自动登录失败"}), 401
+    try:
+        out = _teacherdata_questionnaires_for_teacher(int(lg["teacher_id"]))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+    return jsonify({
+        "ok": True,
+        "auto": True,
+        "teacher_id": int(lg["teacher_id"]),
+        "teacher_name": lg.get("teacher_name") or t.get("name") or "",
+        "auth_prefill": {"id_number": str(t.get("id_number") or ""), "phone": str(t.get("phone") or "")},
+        "questionnaires": out,
+    })
+
+
+@app.route("/api/teacher-questionnaires/submit", methods=["POST"])
+def api_teacher_questionnaires_submit():
+    """
+    主站代 TeacherDataSystem 提交问卷：身份证+手机号校验后提交 answers。
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    id_number = str(data.get("id_number") or data.get("idNumber") or "").strip()
+    phone = str(data.get("phone") or "").strip()
+    qid_raw = data.get("questionnaire_id") or data.get("questionnaireId")
+    answers = data.get("answers") if isinstance(data.get("answers"), dict) else {}
+    try:
+        qid = int(qid_raw)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "msg": "questionnaire_id 非法"}), 400
+    lg = _teacherdata_login(id_number, phone)
+    if not lg.get("ok"):
+        return jsonify({"ok": False, "msg": lg.get("msg") or "身份验证失败"}), 401
+
+    u = _teacherdata_base_url() + "/api/questionnaires/responses"
+    payload = {
+        "questionnaire_id": qid,
+        "teacher_id": int(lg["teacher_id"]),
+        "answers": answers,
+    }
+    headers = {
+        "content-type": "application/json",
+        "X-Teacher-Token": str(lg["token"]),
+    }
+    try:
+        r = requests.post(u, json=payload, headers=headers, timeout=20)
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "msg": f"提交失败：{e}"}), 502
+    try:
+        d = r.json()
+    except Exception:
+        d = {"detail": (r.text or "")[:400]}
+    if r.status_code >= 400:
+        return jsonify({"ok": False, "msg": str(d.get("detail") or d.get("msg") or r.status_code), "raw": d}), r.status_code
+    return jsonify({"ok": True, "data": d})
 
 
 @app.route('/api/request-parse', methods=['POST'])
@@ -917,6 +1294,12 @@ def api_admin_review_request(rid: int):
         if st == "approved":
             req_obj = _row_to_req(row)
             exec_obj = _execute_approved_queue_item(req_obj)
+            if str(req_obj.get("type") or "") == "seal":
+                if not isinstance(exec_obj, dict) or not bool(exec_obj.get("ok")):
+                    msg = ""
+                    if isinstance(exec_obj, dict):
+                        msg = str(exec_obj.get("message") or "").strip()
+                    return jsonify({'ok': False, 'msg': msg or '校章自动生成结果 PDF 失败，未通过审批'}), 400
             exec_json = json.dumps(exec_obj, ensure_ascii=False, default=str)
             executed_at = _now_iso()
             conn.execute(
@@ -2715,19 +3098,20 @@ def api_dept_auth_child():
 # ---------- 3. 搜索用户（网管平台） ----------
 @app.route('/api/search-users', methods=['POST'])
 def api_search_users():
-    if not CAMPUS_BASE or not CAMPUS_TOKEN:
+    data = request.get_json(force=True, silent=True) or {}
+    campus_base, campus_token = _campus_cfg_from_request(data)
+    if not campus_base or not campus_token:
         return jsonify({
             'code': 503,
-            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN',
+            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN，或在页面填写 Base URL 与 CSRF Token',
         }), 503
-    data = request.get_json(force=True, silent=True) or {}
     user_group_id = data.get('userGroupId') or ''
     user_name = (data.get('userName') or '').strip()
 
     if not user_name:
         return jsonify({'code': 400, 'msg': 'userName 不能为空'}), 400
 
-    url = f'{CAMPUS_BASE}/controller/campus/v1/usermgr/users'
+    url = f'{campus_base}/controller/campus/v1/usermgr/users'
     body = {
         'userGroupId': user_group_id or '00000000-0000-0000-0000-000000000000',
         'quickQuery': False,
@@ -2742,23 +3126,35 @@ def api_search_users():
         'content-type': 'application/json',
         'x-requested-with': 'XMLHttpRequest',
         'http_x_requested_with': 'XMLHttpRequest',
-        'x-uni-crsf-token': CAMPUS_TOKEN,
-        'roarand': CAMPUS_TOKEN,
+        'x-uni-crsf-token': campus_token,
+        'roarand': campus_token,
     }
-
-    resp = session.post(url, json=body, headers=headers, timeout=15)
-    return jsonify(resp.json()), resp.status_code
+    try:
+        resp = session.post(url, json=body, headers=headers, timeout=15, verify=_campus_verify_tls())
+    except requests.exceptions.SSLError as e:
+        return jsonify({
+            'code': 502,
+            'msg': '校园网管 HTTPS 证书校验失败。若为内网自签证书，请在 .env 设置 CAMPUS_VERIFY_TLS=0 后重试。',
+            'detail': str(e),
+        }), 502
+    except requests.RequestException as e:
+        return jsonify({'code': 502, 'msg': f'请求校园网管失败：{e}'}), 502
+    try:
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({'code': resp.status_code, 'msg': '校园网管返回非 JSON', 'raw': (resp.text or '')[:800]}), resp.status_code
 
 
 # ---------- 4. 重置网络密码 ----------
 @app.route('/api/reset-net-password', methods=['POST'])
 def api_reset_net_password():
-    if not CAMPUS_BASE or not CAMPUS_TOKEN:
+    data = request.get_json(force=True, silent=True) or {}
+    campus_base, campus_token = _campus_cfg_from_request(data)
+    if not campus_base or not campus_token:
         return jsonify({
             'code': 503,
-            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN',
+            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN，或在页面填写 Base URL 与 CSRF Token',
         }), 503
-    data = request.get_json(force=True, silent=True) or {}
     user_id = (data.get('userId') or '').strip()
     user_name = (data.get('userName') or '').strip() or user_id
     password = data.get('password') or ''
@@ -2766,7 +3162,7 @@ def api_reset_net_password():
     if not user_id or not password:
         return jsonify({'code': 400, 'msg': 'userId 或 password 为空'}), 400
 
-    url = f'{CAMPUS_BASE}/controller/campus/v1/usermgr/userpwd/{user_id}'
+    url = f'{campus_base}/controller/campus/v1/usermgr/userpwd/{user_id}'
     body = {
         'userName': user_name,
         'userId': user_id,
@@ -2778,12 +3174,23 @@ def api_reset_net_password():
         'content-type': 'application/json',
         'x-requested-with': 'XMLHttpRequest',
         'http_x_requested_with': 'XMLHttpRequest',
-        'x-uni-crsf-token': CAMPUS_TOKEN,
-        'roarand': CAMPUS_TOKEN,
+        'x-uni-crsf-token': campus_token,
+        'roarand': campus_token,
     }
-
-    resp = session.put(url, json=body, headers=headers, timeout=15)
-    return jsonify(resp.json()), resp.status_code
+    try:
+        resp = session.put(url, json=body, headers=headers, timeout=15, verify=_campus_verify_tls())
+    except requests.exceptions.SSLError as e:
+        return jsonify({
+            'code': 502,
+            'msg': '校园网管 HTTPS 证书校验失败。若为内网自签证书，请在 .env 设置 CAMPUS_VERIFY_TLS=0 后重试。',
+            'detail': str(e),
+        }), 502
+    except requests.RequestException as e:
+        return jsonify({'code': 502, 'msg': f'请求校园网管失败：{e}'}), 502
+    try:
+        return jsonify(resp.json()), resp.status_code
+    except Exception:
+        return jsonify({'code': resp.status_code, 'msg': '校园网管返回非 JSON', 'raw': (resp.text or '')[:800]}), resp.status_code
 
 
 @app.route('/api/schoolisover-token', methods=['GET'])
@@ -2799,239 +3206,6 @@ def api_schoolisover_token():
         return jsonify({'ok': True, 'token': t})
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)}), 500
-
-
-# ---------- 教师数据填报 + 问卷（原 Node server/index.js 逻辑合并至此） ----------
-
-
-@app.route("/api/teacher-data/submit", methods=["POST"])
-def api_teacher_data_submit():
-    data = request.get_json(force=True, silent=True) or {}
-    name = str(data.get("name") or "").strip()
-    if not name:
-        return jsonify({"ok": False, "msg": "缺少姓名"}), 400
-    payload_json = json.dumps(data, ensure_ascii=False)
-    created_at = str(data.get("submitted_at") or "").strip() or _now_iso()
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """INSERT INTO teacher_records (name, dept, mobile, email, subjects, remark, payload_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (
-                name,
-                (str(data.get("dept") or "").strip() or None),
-                (str(data.get("mobile") or "").strip() or None),
-                (str(data.get("email") or "").strip() or None),
-                (str(data.get("subjects") or "").strip() or None),
-                (str(data.get("remark") or "").strip() or None),
-                payload_json,
-                created_at,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify({"ok": True})
-
-
-@app.route("/api/teacher-data/list", methods=["GET"])
-def api_teacher_data_list():
-    if not _admin_api_authorized():
-        return _admin_api_denied_response()
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        rows = conn.execute(
-            "SELECT id, name, dept, mobile, email, subjects, remark, created_at, payload_json FROM teacher_records ORDER BY id DESC"
-        ).fetchall()
-    finally:
-        conn.close()
-    out = []
-    for row in rows:
-        submitted_at = row["created_at"]
-        try:
-            p = json.loads(row["payload_json"] or "{}")
-            if isinstance(p, dict) and p.get("submitted_at"):
-                submitted_at = p.get("submitted_at")
-        except Exception:
-            pass
-        out.append(
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "dept": row["dept"],
-                "mobile": row["mobile"],
-                "email": row["email"],
-                "subjects": row["subjects"],
-                "remark": row["remark"],
-                "submitted_at": submitted_at,
-            }
-        )
-    return jsonify({"ok": True, "data": out})
-
-
-def _qv_new_id():
-    return "sv_" + str(int(time.time() * 1000)) + "_" + uuid.uuid4().hex[:6]
-
-
-@app.route("/api/quickvote/surveys", methods=["GET"])
-def api_quickvote_surveys():
-    if not _admin_api_authorized():
-        return _admin_api_denied_response()
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        rows = conn.execute(
-            "SELECT id, title, definition_json FROM quickvote_surveys ORDER BY updated_at DESC"
-        ).fetchall()
-    finally:
-        conn.close()
-    data = {}
-    for row in rows:
-        try:
-            data[row["id"]] = json.loads(row["definition_json"] or "{}")
-        except Exception:
-            data[row["id"]] = {"title": row["title"], "questions": []}
-    return jsonify({"ok": True, "data": data})
-
-
-@app.route("/api/quickvote/survey/<string:sid>", methods=["GET", "PUT"])
-def api_quickvote_survey_one(sid: str):
-    sid = (sid or "").strip()
-    if not sid:
-        return jsonify({"ok": False, "msg": "缺少 id"}), 400
-    if request.method == "PUT":
-        if not _admin_api_authorized():
-            return _admin_api_denied_response()
-        b = request.get_json(force=True, silent=True) or {}
-        title = str(b.get("title") or "").strip() or "未命名"
-        questions = b.get("questions") if isinstance(b.get("questions"), list) else []
-        defn = {"title": title, "questions": questions}
-        conn = _db()
-        try:
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute(
-                """INSERT INTO quickvote_surveys (id, title, definition_json, updated_at)
-                   VALUES (?,?,?, datetime('now'))
-                   ON CONFLICT(id) DO UPDATE SET
-                     title = excluded.title,
-                     definition_json = excluded.definition_json,
-                     updated_at = datetime('now')""",
-                (sid, title, json.dumps(defn, ensure_ascii=False)),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-        return jsonify({"ok": True})
-
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        row = conn.execute(
-            "SELECT id, title, definition_json FROM quickvote_surveys WHERE id=?",
-            (sid,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        return jsonify({"ok": False, "msg": "问卷不存在"}), 404
-    try:
-        defn = json.loads(row["definition_json"] or "{}")
-    except Exception:
-        defn = {"title": row["title"], "questions": []}
-    return jsonify({"ok": True, "data": defn})
-
-
-@app.route("/api/quickvote/survey", methods=["POST"])
-def api_quickvote_survey_create():
-    if not _admin_api_authorized():
-        return _admin_api_denied_response()
-    b = request.get_json(force=True, silent=True) or {}
-    title = str(b.get("title") or "").strip()
-    if not title:
-        return jsonify({"ok": False, "msg": "缺少标题"}), 400
-    sid = str(b.get("id") or "").strip() or _qv_new_id()
-    questions = b.get("questions") if isinstance(b.get("questions"), list) else []
-    defn = {"title": title, "questions": questions}
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """INSERT INTO quickvote_surveys (id, title, definition_json, updated_at)
-               VALUES (?,?,?, datetime('now'))
-               ON CONFLICT(id) DO UPDATE SET
-                 title = excluded.title,
-                 definition_json = excluded.definition_json,
-                 updated_at = datetime('now')""",
-            (sid, title, json.dumps(defn, ensure_ascii=False)),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify({"ok": True, "id": sid})
-
-
-@app.route("/api/quickvote/submit", methods=["POST"])
-def api_quickvote_submit():
-    b = request.get_json(force=True, silent=True) or {}
-    survey_id = str(b.get("survey_id") or "").strip()
-    if not survey_id:
-        return jsonify({"ok": False, "msg": "缺少 survey_id"}), 400
-    answers = b.get("answers")
-    if answers is None:
-        answers = {}
-    if not isinstance(answers, dict):
-        answers = {"value": answers}
-    submitted_at = str(b.get("submitted_at") or "").strip() or _now_iso()
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        row = conn.execute("SELECT id FROM quickvote_surveys WHERE id=?", (survey_id,)).fetchone()
-        if not row:
-            conn.execute(
-                """INSERT INTO quickvote_surveys (id, title, definition_json, updated_at)
-                   VALUES (?,?,?, datetime('now'))""",
-                (
-                    survey_id,
-                    "(迁移占位·仅有答卷)",
-                    json.dumps({"title": "(迁移占位)", "questions": [], "_placeholder": True}, ensure_ascii=False),
-                ),
-            )
-        conn.execute(
-            "INSERT INTO quickvote_responses (survey_id, answers_json, submitted_at) VALUES (?,?,?)",
-            (survey_id, json.dumps(answers, ensure_ascii=False), submitted_at),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify({"ok": True})
-
-
-@app.route("/api/quickvote/responses/<string:sid>", methods=["GET"])
-def api_quickvote_responses(sid: str):
-    if not _admin_api_authorized():
-        return _admin_api_denied_response()
-    sid = (sid or "").strip()
-    if not sid:
-        return jsonify({"ok": False, "msg": "缺少 id"}), 400
-    conn = _db()
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        rows = conn.execute(
-            "SELECT id, answers_json, submitted_at FROM quickvote_responses WHERE survey_id=? ORDER BY id DESC",
-            (sid,),
-        ).fetchall()
-    finally:
-        conn.close()
-    out = []
-    for row in rows:
-        try:
-            ans = json.loads(row["answers_json"] or "{}")
-        except Exception:
-            ans = {}
-        out.append({"id": row["id"], "submitted_at": row["submitted_at"], "answers": ans})
-    return jsonify({"ok": True, "data": out})
 
 
 if __name__ == '__main__':

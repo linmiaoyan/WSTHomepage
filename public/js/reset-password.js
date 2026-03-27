@@ -12,6 +12,15 @@ function setStatus(text, type) {
     el.className = type ? type : "";
 }
 
+function getCampusConfigPayload() {
+    const baseUrl = ((document.getElementById("baseUrl") || {}).value || "").trim();
+    const csrfToken = ((document.getElementById("csrfToken") || {}).value || "").trim();
+    return {
+        baseUrl: baseUrl,
+        csrfToken: csrfToken,
+    };
+}
+
 // 搜索用户：POST /controller/campus/v1/usermgr/users
 async function searchUsers() {
     const userGroupId = (document.getElementById("userGroupId") || {}).value.trim();
@@ -29,6 +38,7 @@ async function searchUsers() {
     setStatus("", "");
 
     const body = {
+        ...getCampusConfigPayload(),
         userGroupId: userGroupId || undefined,
         quickQuery: false,
         queryAll: false,
@@ -109,6 +119,7 @@ async function resetPassword() {
     setStatus("提交中…", "");
 
     const body = {
+        ...getCampusConfigPayload(),
         userName: userName || userId,
         userId: userId,
         password: password,

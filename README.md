@@ -1,20 +1,18 @@
 # WSTHompage
 
-学校管理中心与门户系统（Flask 单进程）。
+学校管理中心与门户系统，主站基于 Flask。
 
 ## 目录说明
 
-- `server.py`：后端主程序（Flask），包含管理中心审批、教师数据、问卷 API。
-- `public/`：前端静态资源根目录（入口页、样式、脚本、子页面）。
-- `keadmin_queue.db`：本地 SQLite 数据库（审批队列 + 教师数据 + 问卷）。
-- `1push.bat`：提交并推送到 GitHub（交互版）。
-- `2pull_normal.bat`：常规拉取更新。
-- `3pull_force.bat`：强制与远端同步（会丢弃本地未提交改动）。
-- `docs/shortcuts/`：本地快捷方式收纳目录（不影响程序运行）。
+- `server.py`：主站后端，包含审批队列、钉钉登录、车牌、周期请假、网络密码、校章等能力
+- `public/`：主站静态资源目录
+- `keadmin_queue.db`：本地 SQLite 数据库，当前用于审批队列
+- `run_stack.py`：一键拉起主站、原版 QuickVote、原版 TeacherDataSystem
+- `vendor/`：原版子系统备份目录
 
 ## 启动方式
 
-### 仅主站（审批 / 门户）
+### 仅启动主站
 
 ```bash
 python server.py
@@ -22,35 +20,47 @@ python server.py
 
 端口由环境变量 `PORT` 控制，默认 `8000`。
 
-### 主站 + 原版 QuickVote + 原版 TeacherDataSystem
-
-民主测评（二维码、原模板）与教师数据系统（PDF 模板、任务、教师库）来自备份项目，需**单独进程**运行，与主站合并见 `vendor/README.md`。
+### 启动主站 + 原版 QuickVote + 原版 TeacherDataSystem
 
 ```bash
 python run_stack.py
 ```
 
-或使用 `start_stack.bat`。默认端口：主站 `8000`、QuickVote `5005`、TeacherDataSystem `8001`（可在 `.env` 修改）。
+也可使用 `start_stack.bat`。默认端口：
 
-门户与管理中心通过 `/go/quickvote`、`/go/teacher-data-system` 跳转；请在 `.env` 设置 `QUICKVOTE_PUBLIC_URL`、`TEACHERDATA_PUBLIC_URL` 为实际访问地址（公网或反代后的 URL），以便 QuickVote 生成二维码正确。
+- 主站：`8000`
+- QuickVote：`8001`
+- TeacherDataSystem：`8002`
 
-常用入口：
+可在 `.env` 中调整。
 
-- 门户首页：`http://127.0.0.1:8000/home.html`（或根路径静态入口）
-- 管理中心：`http://127.0.0.1:8000/index.html`
-- 原版 QuickVote：`http://127.0.0.1:5005/`（未改端口时）
-- 原版教师数据：`http://127.0.0.1:8001/query`（未改端口时）
+## 主站入口
 
-## 静态目录规则
+- 统一主页（管理中心）：`http://127.0.0.1:8000/index.html`
+- 教师申请：`http://127.0.0.1:8000/teacher.html`
 
-`server.py` 默认优先使用 `public/` 作为静态根目录。
+`/home.html` 已保留为兼容跳转页，会自动跳到 `/index.html`。
 
-- 若 `public/index.html` 存在：使用 `public/`
-- 否则自动回退到项目根目录（兼容模式）
+教师申请页新增「问卷填写」标签：主站会以身份证号+手机号验证后，直接读取并提交 TeacherDataSystem 发起的问卷（主站入口统一，TeacherDataSystem 作为后端数据源）。
 
-你也可以在 `.env` 中通过 `WEB_ROOT_DIR` 指定其他静态目录。
+主站内不再提供简化版教师数据和简化版问卷页面；如需进入原版子系统，请先进入管理中心，再通过：
+
+- `/go/quickvote`
+- `/go/teacher-data-system`
+- `/go/teacher-questionnaire`（教师问卷填写统一入口，默认跳转 TeacherDataSystem 的 `/teacher/dashboard`）
+
+进行跳转。
+
+## 原版子系统
+
+原版 QuickVote 与原版 TeacherDataSystem 需独立运行，并通过主站聚合。请在 `.env` 中配置：
+
+- `QUICKVOTE_PUBLIC_URL`
+- `TEACHERDATA_PUBLIC_URL`
+
+用于管理中心跳转到实际可访问地址。
 
 ## 说明
 
-- `.env`、`*.db`、日志等已在 `.gitignore` 中忽略，避免误提交。
-- 若执行 `3pull_force.bat`，请先确认本地改动已提交或备份。
+- `.env`、`*.db`、日志等已在 `.gitignore` 中忽略
+- 执行强制拉取脚本前，请先确认本地改动已提交或备份

@@ -612,9 +612,28 @@ def _auto_generate_seal_result_pdf(req: dict) -> dict:
         return {"ok": False, "type": "seal", "id": rid, "message": "尚未上传校章图片，请管理员先在校章审核页上传校章图"}
 
     try:
-        import fitz  # PyMuPDF
-    except Exception:
-        return {"ok": False, "type": "seal", "id": rid, "message": "服务器缺少 PyMuPDF，无法自动生成盖章 PDF"}
+        import fitz  # PyMuPDF（pip 包名 pymupdf）
+    except ImportError as e:
+        return {
+            "ok": False,
+            "type": "seal",
+            "id": rid,
+            "message": (
+                "当前运行服务的 Python 未安装 PyMuPDF。请用「与启动本服务相同的」解释器执行："
+                "python -m pip install pymupdf（勿混用系统 python 与 venv）。"
+                f" 导入错误: {e}"
+            ),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "type": "seal",
+            "id": rid,
+            "message": (
+                "PyMuPDF 已安装但加载失败（常见于 DLL/运行库缺失、32/64 位与 Python 不一致）。"
+                f" 详情: {e}"
+            ),
+        }
 
     out_name = _seal_result_filename(int(rid or 0))
     out_path = os.path.join(UPLOADS_DIR, out_name)

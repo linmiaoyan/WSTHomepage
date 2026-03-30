@@ -60,6 +60,9 @@ EDU_CFG_PHP = _env_get("EDU_CFG_PHP", "")
 LEAVE_BASE = _env_get("LEAVE_BASE", "")
 LEAVE_USER = _env_get("LEAVE_USER", "")
 LEAVE_PASS = _env_get("LEAVE_PASS", "")
+# 可选：按钉钉身份映射智慧校园账号/密码（JSON 字符串）
+# 例：{"096919072026386572":{"user":"张三","pass":"***"},"张三":{"user":"张三","pass":"***"}}
+LEAVE_CRED_MAP_JSON = _env_get("LEAVE_CRED_MAP_JSON", "")
 CAMPUS_BASE = _env_get("CAMPUS_BASE", "")
 CAMPUS_TOKEN = _env_get("CAMPUS_TOKEN", "")
 
@@ -190,6 +193,67 @@ def _campus_cfg_from_request(data: dict) -> tuple:
         base = CAMPUS_BASE
         token = CAMPUS_TOKEN
     return base.rstrip("/"), token
+
+
+def _parse_json_obj(s: str) -> dict:
+    s = (s or "").strip()
+    if not s:
+        return {}
+    try:
+        j = json.loads(s)
+        return j if isinstance(j, dict) else {}
+    except Exception:
+        return {}
+
+
+def _leave_cred_map() -> dict:
+    """
+    读取 LEAVE_CRED_MAP_JSON。
+    key 可为：钉钉 userId/openId/unionId/name/display_name/summary 片段。
+    value 需为对象：{"user":"智慧校园用户名","pass":"智慧校园密码"}。
+    """
+    return _parse_json_obj(LEAVE_CRED_MAP_JSON)
+
+
+def _resolve_leave_login_cred(requester: dict = None) -> tuple:
+    """
+    根据发起人钉钉身份动态决定智慧校园登录账号。
+    未命中映射时回退 LEAVE_USER / LEAVE_PASS。
+    """
+    default_user = (LEAVE_USER or "").strip()
+    default_pass = (LEAVE_PASS or "").strip()
+    if not isinstance(requester, dict):
+        return default_user, default_pass
+
+    uid = str(requester.get("userId") or requester.get("userid") or "").strip()
+    oid = str(requester.get("openId") or requester.get("open_id") or "").strip()
+    uni = str(requester.get("unionId") or requester.get("unionid") or "").strip()
+    name = str(requester.get("name") or "").strip()
+    display = str(requester.get("display_name") or requester.get("nick") or "").strip()
+    summary = str(requester.get("summary") or "").strip()
+
+    keys = []
+    for k in (uid, oid, uni, name, display):
+        if k and k not in keys:
+            keys.append(k)
+    # 兼容 summary 中的“钉钉userId:xxxx”
+    if summary:
+        m = re.search(r"钉钉userId:([A-Za-z0-9_\-]+)", summary)
+        if m:
+            sid = m.group(1).strip()
+            if sid and sid not in keys:
+                keys.append(sid)
+
+    mp = _leave_cred_map()
+    for k in keys:
+        v = mp.get(k)
+        if not isinstance(v, dict):
+            continue
+        u = str(v.get("user") or v.get("username") or "").strip()
+        p = str(v.get("pass") or v.get("password") or "").strip()
+        if u and p:
+            return u, p
+    return default_user, default_pass
 
 
 def _row_to_req(row):
@@ -422,7 +486,7 @@ def _execute_approved_queue_item(req: dict) -> dict:
 
         if t == "leave_cycle":
             body = _map_leave_params_to_cycle_body(p)
-            out, code = _leave_cycle_submit_core(body)
+            out, code = _leave_cycle_submit_core(body, requester=req.get("requester"))
             ok = bool(out.get("ok")) and code < 400
             return {
                 "ok": ok,
@@ -1556,11 +1620,50 @@ def _dingtalk_h5_userinfo_by_code(auth_code: str) -> dict:
     uid = str(j.get("userid") or j.get("userId") or "").strip()
     if not uid:
         raise ValueError("dingtalk getuserinfo missing userid")
+    base_name = str(j.get("name") or uid).strip() or uid
     prof = {
         "userId": uid,
-        "display_name": str(j.get("name") or uid),
-        "summary": "钉钉userId:" + uid,
+        # 关键：同时写入 name/nick，避免后续 _dingtalk_normalize_profile 把显示名变成 "-"
+        "name": base_name,
+        "nick": base_name,
+        "display_name": base_name,
+        "summary": base_name,
     }
+
+    # 尝试按“新版 SDK 文档”调用通讯录个人信息接口补全（优先）
+    # 文档对应：GET /v1.0/contact/users/{unionId}，这里用 {unionId}=me
+    try:
+        tok = _dingtalk_user_access_token(auth_code)
+        access_token = str(tok.get("accessToken") or tok.get("access_token") or "").strip()
+        if access_token:
+            me_raw = _dingtalk_me(access_token)
+            if isinstance(me_raw, dict):
+                nick = str(me_raw.get("nick") or "").strip()
+                if nick:
+                    prof["nick"] = nick
+                    prof["name"] = nick
+                    prof["display_name"] = nick
+                    prof["summary"] = nick
+                # 用于标识匹配（我的申请/leave cred map）
+                if me_raw.get("unionId") is not None:
+                    prof["unionId"] = str(me_raw.get("unionId") or "").strip()
+                if me_raw.get("openId") is not None:
+                    prof["openId"] = str(me_raw.get("openId") or "").strip()
+                if me_raw.get("mobile") is not None and str(me_raw.get("mobile") or "").strip():
+                    prof["mobile"] = str(me_raw.get("mobile") or "").strip()
+    except Exception:
+        # 回退：旧接口（应用级）补全姓名；如果权限不匹配，仍可能拿不到 name
+        try:
+            ext = _dingtalk_user_profile_by_userid(uid)
+            if isinstance(ext, dict):
+                nm = str(ext.get("name") or ext.get("display_name") or "").strip()
+                if nm:
+                    prof["name"] = nm
+                    prof["nick"] = nm
+                    prof["display_name"] = nm
+                    prof["summary"] = nm
+        except Exception:
+            pass
     return prof
 
 
@@ -2584,11 +2687,15 @@ def api_platform_login():
     except Exception as e:
         return jsonify({'ok': False, 'msg': str(e)}), 500
 
-def _leave_login(sess: requests.Session, vercode: str = ''):
+def _leave_login(sess: requests.Session, vercode: str = '', usrname: str = '', passwd: str = ''):
+    user = (usrname or LEAVE_USER or "").strip()
+    pwd = (passwd or LEAVE_PASS or "").strip()
+    if not user or not pwd:
+        raise ValueError("未配置周期请假账号：请设置 LEAVE_USER/LEAVE_PASS 或 LEAVE_CRED_MAP_JSON")
     # establish cookies
     sess.get(f'{LEAVE_BASE}/base/login.html', timeout=15)
     data = {
-        'encrypt': _leave_encrypt_payload(LEAVE_USER, LEAVE_PASS, vercode),
+        'encrypt': _leave_encrypt_payload(user, pwd, vercode),
         'redirect_url': '',
         'client_id': '',
         'response_type': '',
@@ -2714,7 +2821,7 @@ def _leave_cycle_group_list_slot_count() -> int:
     return max(1, min(n, 30))
 
 
-def _leave_cycle_submit_core(data: dict):
+def _leave_cycle_submit_core(data: dict, requester: dict = None):
     """
     与 /api/leave-cycle 相同逻辑，返回 (body_dict, http_status)。
 
@@ -2729,10 +2836,11 @@ def _leave_cycle_submit_core(data: dict):
       与平台一致；不传则对有效行填空字符串。
     - 与页面 URL 一致：先 GET …/add/grade/{grade}/time_change/{times|lesson}.html 取 __token__（勿让 time_change 为 undefined）。
     """
-    if not LEAVE_BASE or not LEAVE_USER or not LEAVE_PASS:
+    dyn_user, dyn_pass = _resolve_leave_login_cred(requester)
+    if not LEAVE_BASE or not dyn_user or not dyn_pass:
         return {
             'ok': False,
-            'msg': '未配置周期请假：请在 .env 中设置 LEAVE_BASE、LEAVE_USER、LEAVE_PASS',
+            'msg': '未配置周期请假账号：请在 .env 设置 LEAVE_BASE，并配置 LEAVE_USER/LEAVE_PASS 或 LEAVE_CRED_MAP_JSON',
         }, 503
     # grade：未传键时默认 "1"（兼容旧客户端）；传 "" / auto 等表示不确定 → 按 LEAVE_GRADE_GIDS_TRY 遍历高一/高二/高三
     _gr = data.get("grade")
@@ -2773,7 +2881,7 @@ def _leave_cycle_submit_core(data: dict):
 
     sess = requests.Session()
     try:
-        login_resp = _leave_login(sess, vercode=vercode)
+        login_resp = _leave_login(sess, vercode=vercode, usrname=dyn_user, passwd=dyn_pass)
         j = login_resp.json()
         if not (j.get('code') == 1 or str(j.get('code')) == '1'):
             msg = j.get('msg', '')
@@ -2845,6 +2953,7 @@ def _leave_cycle_submit_core(data: dict):
             # 便于与浏览器 F12 中平台原生表单对照：学生批量条数、星期行数、模式
             'post_summary': {
                 'endpoint': 'studentwork/teacher.studentleavecycle/add.html',
+                'login_user': dyn_user,
                 'grade_input': grade,
                 'grade_submitted': eff_grade,
                 'grade_auto_scan': bool(_leave_grade_uncertain(grade)),
@@ -2876,7 +2985,7 @@ def _leave_cycle_submit_core(data: dict):
 @app.route('/api/leave-cycle', methods=['POST'])
 def api_leave_cycle():
     data = request.get_json(force=True, silent=True) or {}
-    body, code = _leave_cycle_submit_core(data)
+    body, code = _leave_cycle_submit_core(data, requester=web_session.get("dt_user"))
     return jsonify(body), code
 
 

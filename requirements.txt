@@ -3,3 +3,6 @@ requests
 pycryptodome
 PyMuPDF
 flask_sqlalchemy
+uvicorn
+fastapi
+flask_login

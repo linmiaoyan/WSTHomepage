@@ -162,7 +162,13 @@ async def admin_login(request: Request):
     try:
         data = await request.json()
         login_req = LoginRequest(**data)
-        
+
+        if not config.ADMIN_PASSWORD:
+            raise HTTPException(
+                status_code=503,
+                detail="服务器未配置环境变量 ADMIN_PASSWORD，管理员登录已禁用",
+            )
+
         if login_req.password == config.ADMIN_PASSWORD:
             token = create_admin_session()
             from fastapi.responses import JSONResponse

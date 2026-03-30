@@ -174,12 +174,21 @@ def _campus_verify_tls() -> bool:
     return str(_env_get("CAMPUS_VERIFY_TLS", "0")).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _campus_allow_client_override() -> bool:
+    """仅在为真时允许请求体覆盖 CAMPUS_BASE/CAMPUS_TOKEN（本地调试）；默认禁止以防 SSRF/开放代理。"""
+    return str(_env_get("CAMPUS_ALLOW_CLIENT_OVERRIDE", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _campus_cfg_from_request(data: dict) -> tuple:
-    """支持前端临时覆盖 base/csrf；未传则回退 .env 配置。"""
+    """校园网管 base/token：默认仅用 .env；CAMPUS_ALLOW_CLIENT_OVERRIDE=1 时才接受请求体覆盖。"""
     if not isinstance(data, dict):
         data = {}
-    base = str(data.get("baseUrl") or data.get("base_url") or "").strip() or CAMPUS_BASE
-    token = str(data.get("csrfToken") or data.get("csrf_token") or "").strip() or CAMPUS_TOKEN
+    if _campus_allow_client_override():
+        base = str(data.get("baseUrl") or data.get("base_url") or "").strip() or CAMPUS_BASE
+        token = str(data.get("csrfToken") or data.get("csrf_token") or "").strip() or CAMPUS_TOKEN
+    else:
+        base = CAMPUS_BASE
+        token = CAMPUS_TOKEN
     return base.rstrip("/"), token
 
 
@@ -3098,12 +3107,14 @@ def api_dept_auth_child():
 # ---------- 3. 搜索用户（网管平台） ----------
 @app.route('/api/search-users', methods=['POST'])
 def api_search_users():
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
     data = request.get_json(force=True, silent=True) or {}
     campus_base, campus_token = _campus_cfg_from_request(data)
     if not campus_base or not campus_token:
         return jsonify({
             'code': 503,
-            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN，或在页面填写 Base URL 与 CSRF Token',
+            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN（本地调试可设 CAMPUS_ALLOW_CLIENT_OVERRIDE=1 并走请求体覆盖）',
         }), 503
     user_group_id = data.get('userGroupId') or ''
     user_name = (data.get('userName') or '').strip()
@@ -3148,12 +3159,14 @@ def api_search_users():
 # ---------- 4. 重置网络密码 ----------
 @app.route('/api/reset-net-password', methods=['POST'])
 def api_reset_net_password():
+    if not _admin_api_authorized():
+        return _admin_api_denied_response()
     data = request.get_json(force=True, silent=True) or {}
     campus_base, campus_token = _campus_cfg_from_request(data)
     if not campus_base or not campus_token:
         return jsonify({
             'code': 503,
-            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN，或在页面填写 Base URL 与 CSRF Token',
+            'msg': '未配置校园网管接口：请在 .env 中设置 CAMPUS_BASE、CAMPUS_TOKEN（本地调试可设 CAMPUS_ALLOW_CLIENT_OVERRIDE=1 并走请求体覆盖）',
         }), 503
     user_id = (data.get('userId') or '').strip()
     user_name = (data.get('userName') or '').strip() or user_id
@@ -3210,5 +3223,5 @@ def api_schoolisover_token():
 
 if __name__ == '__main__':
     _main_port = int(_env_get("PORT", "8000") or "8000")
-    # 开发环境显式开启线程，避免单个慢请求阻塞其他接口
-    app.run(host='0.0.0.0', port=_main_port, debug=True, threaded=True)
+    _flask_debug = str(_env_get("DEBUG", "0")).strip().lower() in ("1", "true", "yes", "on")
+    app.run(host='0.0.0.0', port=_main_port, debug=_flask_debug, threaded=True)

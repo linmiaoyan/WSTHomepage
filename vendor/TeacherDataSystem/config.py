@@ -27,8 +27,8 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 # HTML文件大小限制（MB）
 MAX_HTML_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
-# 管理员密码（可以通过环境变量 ADMIN_PASSWORD 设置，默认密码为 kjgz@123）
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "kjgz@123")
+# 管理员密码：必须通过环境变量 ADMIN_PASSWORD 设置，禁止仓库内默认弱口令
+ADMIN_PASSWORD = (os.getenv("ADMIN_PASSWORD") or "").strip()
 
 # 大模型配置（如果需要使用）
 # LLM_API_KEY = os.getenv("LLM_API_KEY", "")

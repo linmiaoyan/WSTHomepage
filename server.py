@@ -2544,6 +2544,14 @@ def _get_schoolisover_access_token():
     return token, iframe_url, html[:500]
 
 
+def _platform_default_credentials() -> tuple:
+    """读取平台管理员默认账号（优先环境变量，其次本地 .env）。"""
+    env_defaults = _read_env_file(_env_here())
+    usrname = (os.environ.get('PLATFORM_USRNAME') or env_defaults.get('PLATFORM_USRNAME') or '').strip()
+    passwd = (os.environ.get('PLATFORM_PASSWD') or env_defaults.get('PLATFORM_PASSWD') or '').strip()
+    return usrname, passwd
+
+
 def _cloud_dept_children(dept_id: str):
     """Call Eduyun deptAuthChild and return JSON dict (best effort)."""
     cfg = _load_eduyun_cfg()
@@ -2672,13 +2680,10 @@ def api_platform_login():
     usrname = (data.get('usrname') or '').strip()
     passwd = (data.get('passwd') or '').strip()
     vercode = (data.get('vercode') or '').strip()
-    # If frontend does not input credentials, fall back to KeAdmin/.env
-    env_here = os.path.join(os.path.dirname(__file__), '.env')
-    env_defaults = _read_env_file(env_here)
     if not usrname:
-        usrname = (os.environ.get('PLATFORM_USRNAME') or env_defaults.get('PLATFORM_USRNAME') or '').strip()
+        usrname, _pwd = _platform_default_credentials()
     if not passwd:
-        passwd = (os.environ.get('PLATFORM_PASSWD') or env_defaults.get('PLATFORM_PASSWD') or '').strip()
+        _usr, passwd = _platform_default_credentials()
     if not usrname or not passwd:
         return jsonify({'ok': False, 'msg': 'usrname/passwd 不能为空（请在前端输入或在 KeAdmin/.env 配置 PLATFORM_USRNAME/PLATFORM_PASSWD）'}), 400
     try:
@@ -3073,12 +3078,59 @@ def _cloud_post_add_vehicle(data: dict):
                         resp = resp_try
                         break
             else:
-                return None, 403, {
-                    'code': 0,
-                    'data': 'need_platform_login',
-                    'msg': '云平台要求重新登录。请先在本页“平台管理员登录”成功后再添加车牌。',
-                    'iframe_url': iframe_url,
-                }
+                # 自动续登一次（用 .env PLATFORM_USRNAME/PLATFORM_PASSWD），减少人工干预
+                try:
+                    p_user, p_pass = _platform_default_credentials()
+                    if p_user and p_pass:
+                        lr = _platform_login(p_user, p_pass, '')
+                        lj = lr.json() if lr is not None else {}
+                        if isinstance(lj, dict) and (lj.get('code') == 1 or str(lj.get('code')) == '1'):
+                            t2, iframe_url2, _preview2 = _get_schoolisover_access_token()
+                            if t2:
+                                headers3 = {
+                                    'accept': 'application/json, text/plain, */*',
+                                    'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                                    'x-requested-with': 'XMLHttpRequest',
+                                    'authorization': t2,
+                                }
+                                resp_try2 = session.post(url, data=payload, headers=headers3, timeout=15)
+                                if resp_try2.status_code != 403:
+                                    resp = resp_try2
+                                else:
+                                    return None, 403, {
+                                        'code': 0,
+                                        'data': 'need_platform_login',
+                                        'msg': '云平台要求重新登录，已自动续登但仍失败，请管理员手动登录后重试。',
+                                        'iframe_url': iframe_url2 or iframe_url,
+                                    }
+                            else:
+                                return None, 403, {
+                                    'code': 0,
+                                    'data': 'need_platform_login',
+                                    'msg': '云平台要求重新登录，自动续登后仍未取到授权令牌，请管理员手动登录。',
+                                    'iframe_url': iframe_url2 or iframe_url,
+                                }
+                        else:
+                            return None, 403, {
+                                'code': 0,
+                                'data': 'need_platform_login',
+                                'msg': '云平台要求重新登录，自动续登失败，请管理员在本页先登录平台账号。',
+                                'iframe_url': iframe_url,
+                            }
+                    else:
+                        return None, 403, {
+                            'code': 0,
+                            'data': 'need_platform_login',
+                            'msg': '云平台要求重新登录，且未配置 PLATFORM_USRNAME/PLATFORM_PASSWD，请管理员先登录。',
+                            'iframe_url': iframe_url,
+                        }
+                except Exception:
+                    return None, 403, {
+                        'code': 0,
+                        'data': 'need_platform_login',
+                        'msg': '云平台要求重新登录，自动续登出现异常，请管理员手动登录后重试。',
+                        'iframe_url': iframe_url,
+                    }
     except Exception:
         pass
 

@@ -328,7 +328,7 @@ async function loadDeptChildren(id) {
     const data = await resp.json().catch(() => ({}));
     const debugText = data && data._debug ? (data._debug.cloud_text_head || data._debug._raw_text_head || '') : '';
     if (resp.status === 403 && data && data.msg === "need_platform_login") {
-        const hint = data.hint || "请先完成平台管理员登录";
+        const hint = data.hint || "系统将自动续登；若失败请再手动完成平台管理员登录";
         throw new Error(debugText ? (hint + "\n" + "云端返回：" + debugText) : hint);
     }
     if (data.code !== 200 || !data.data) {
@@ -583,7 +583,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                     el.value = d.token;
                     setPlatStatus("已填入云平台 Token，可再试提交", true);
                 } else {
-                    setPlatStatus(d.msg || "获取失败，请先完成平台管理员登录", false);
+                    setPlatStatus(d.msg || "获取失败：系统会自动续登；若仍失败请手动登录", false);
                 }
             } catch (e) {
                 setPlatStatus("请求失败：" + e.message, false);

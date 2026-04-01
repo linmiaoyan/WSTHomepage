@@ -466,13 +466,35 @@ def _execute_approved_queue_item(req: dict) -> dict:
                 return {"ok": False, "type": t, "id": rid, "message": "临时车牌缺少开始/结束日期，无法自动提交"}
             cloud_j, sc, need_login = _cloud_post_add_vehicle(data)
             if need_login is not None:
-                return {
-                    "ok": False,
-                    "type": t,
-                    "id": rid,
-                    "message": "云平台需重新登录。请管理员先在管理中心完成「平台管理员登录」后再审批。",
-                    "detail": need_login,
-                }
+                # 审批执行兜底：自动用默认管理员账号续登后重试一次，尽量做到“通过即提交”。
+                auto_retry_err = ""
+                try:
+                    p_user, p_pass = _platform_default_credentials()
+                    if p_user and p_pass:
+                        lr = _platform_login(p_user, p_pass, "")
+                        lj = lr.json() if lr is not None else {}
+                        if isinstance(lj, dict) and (lj.get("code") == 1 or str(lj.get("code")) == "1"):
+                            cloud_j2, sc2, need_login2 = _cloud_post_add_vehicle(data)
+                            if need_login2 is None:
+                                cloud_j, sc, need_login = cloud_j2, sc2, None
+                            else:
+                                auto_retry_err = "自动续登后仍提示需登录"
+                        else:
+                            auto_retry_err = "自动续登返回登录失败"
+                    else:
+                        auto_retry_err = "未配置 PLATFORM_USRNAME/PLATFORM_PASSWD"
+                except Exception as e:
+                    auto_retry_err = str(e)
+
+                if need_login is not None:
+                    return {
+                        "ok": False,
+                        "type": t,
+                        "id": rid,
+                        "message": "云平台需重新登录，且自动续登重试未成功。请管理员在管理中心手动登录后再审批。",
+                        "detail": need_login,
+                        "auto_retry_error": auto_retry_err,
+                    }
             ok = sc < 400 and isinstance(cloud_j, dict) and str(cloud_j.get("code")) == "200"
             msg = (cloud_j or {}).get("msg") if isinstance(cloud_j, dict) else ""
             return {

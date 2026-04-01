@@ -2421,11 +2421,16 @@ def _load_eduyun_cfg():
     global _EDU_CFG
     if _EDU_CFG is not None:
         return _EDU_CFG
-    if not EDU_CFG_PHP or not os.path.exists(EDU_CFG_PHP):
+    cfg_path = (EDU_CFG_PHP or "").strip()
+    if not cfg_path:
+        cfg_path = os.path.join(BASE_DIR, "config", "extra", "eduyun.php")
+    if not os.path.isabs(cfg_path):
+        cfg_path = os.path.join(BASE_DIR, cfg_path)
+    if not os.path.exists(cfg_path):
         raise FileNotFoundError(
-            "Missing Eduyun config: set EDU_CFG_PHP in .env to the full path of eduyun.php"
+            "Missing Eduyun config: put config/extra/eduyun.php in project or set EDU_CFG_PHP in .env"
         )
-    txt = open(EDU_CFG_PHP, "r", encoding="utf-8", errors="ignore").read()
+    txt = open(cfg_path, "r", encoding="utf-8", errors="ignore").read()
     def m(pat):
         mm = re.search(pat, txt)
         return mm.group(1) if mm else ""

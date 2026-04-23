@@ -1,66 +1,60 @@
 # WSTHompage
 
-学校管理中心与门户系统，主站基于 Flask。
+学校门户与**管理中心**（Flask）：钉钉登录、教师申请与审批队列、周期请假/车牌/校章等 API；静态页在 `public/`。
 
-## 目录说明
+## 项目结构
 
-- `server.py`：主站后端，包含审批队列、钉钉登录、车牌、周期请假、网络密码、校章等能力
-- `public/`：主站静态资源目录
-- `keadmin_queue.db`：本地 SQLite 数据库，当前用于审批队列
-- `run_stack.py`：一键拉起主站、原版 QuickVote、原版 TeacherDataSystem
-- `vendor/`：原版子系统备份目录
+| 路径 | 说明 |
+| --- | --- |
+| `server.py` | 唯一入口：开发服务器；可选一键拉起子系统（见下） |
+| `public/` | 主站前端静态资源（`index.html`、`teacher.html` 等） |
+| `keadmin_queue.db` | 审批队列（SQLite，本地文件） |
+| `vendor/` | 原版 [QuickVote](vendor/README.md#原版子系统quickvote--teacherdatasystem) 与 [TeacherDataSystem](vendor/README.md#原版子系统quickvote--teacherdatasystem) 源码 |
+| `docs/` | 钉钉与安全等补充说明 |
 
-## 启动方式
+## 环境
 
-### 仅启动主站
+- 在根目录按各功能需要配置 `.env`；密钥与本地 `.db` 勿提交（见 `.gitignore`）。
+- 大模型等密钥变量名以 `server.py` 中 `_env_get` 为准。
+
+## 启动
+
+### 仅主站
 
 ```bash
 python server.py
 ```
 
-端口由环境变量 `PORT` 控制，默认 `8000`。
+默认端口 `8000`（`PORT`）。调试：`DEBUG=1`。
 
-### 启动主站 + 原版 QuickVote + 原版 TeacherDataSystem
+### 主站 + QuickVote + TeacherDataSystem
+
+子系统需在 `vendor/` 下或经 `QUICKVOTE_ROOT` / `TEACHERDATA_ROOT` 指到有效目录。依赖需单独安装，见 [vendor/README.md](vendor/README.md)。
 
 ```bash
-python run_stack.py
+# Linux / macOS
+START_STACK=1 python server.py
 ```
 
-也可使用 `start_stack.bat`。默认端口：
+```bat
+rem Windows
+set START_STACK=1
+python server.py
+```
 
-- 主站：`8000`
-- QuickVote：`8001`
-- TeacherDataSystem：`8002`
+也可直接运行 [start_stack.bat](start_stack.bat)（已设置 `START_STACK=1`）。
 
-可在 `.env` 中调整。
+默认端口：主站 `8000`（`PORT`），QuickVote `8001`（`QUICKVOTE_PORT`），TeacherDataSystem `8002`（`TEACHERDATA_PORT`）。生产环境请用进程管理 / 反向代理，勿依赖多进程子 shell 的调试模式。
 
-## 主站入口
+## 常用入口（默认端口）
 
-- 统一主页（管理中心）：`http://127.0.0.1:8000/index.html`
+- 管理中心：`http://127.0.0.1:8000/index.html`
 - 教师申请：`http://127.0.0.1:8000/teacher.html`
 
-`/home.html` 已保留为兼容跳转页，会自动跳到 `/index.html`。
+子系统对外的跳转地址在 `.env` 中设置 `QUICKVOTE_PUBLIC_URL`、`TEACHERDATA_PUBLIC_URL`。管理中心内可使用 `/go/quickvote`、`/go/teacher-data-system` 等入口。
 
-教师申请页新增「问卷填写」标签：主站会以身份证号+手机号验证后，直接读取并提交 TeacherDataSystem 发起的问卷（主站入口统一，TeacherDataSystem 作为后端数据源）。
+## 更多文档
 
-主站内不再提供简化版教师数据和简化版问卷页面；如需进入原版子系统，请先进入管理中心，再通过：
-
-- `/go/quickvote`
-- `/go/teacher-data-system`
-- `/go/teacher-questionnaire`（教师问卷填写统一入口，默认跳转 TeacherDataSystem 的 `/teacher/dashboard`）
-
-进行跳转。
-
-## 原版子系统
-
-原版 QuickVote 与原版 TeacherDataSystem 需独立运行，并通过主站聚合。请在 `.env` 中配置：
-
-- `QUICKVOTE_PUBLIC_URL`
-- `TEACHERDATA_PUBLIC_URL`
-
-用于管理中心跳转到实际可访问地址。
-
-## 说明
-
-- `.env`、`*.db`、日志等已在 `.gitignore` 中忽略
-- 执行强制拉取脚本前，请先确认本地改动已提交或备份
+- [vendor/README.md](vendor/README.md) — 子系统安装与说明
+- [docs/DINGTALK-H5.md](docs/DINGTALK-H5.md) — 钉钉 H5
+- [docs/SECURITY-NOTES.md](docs/SECURITY-NOTES.md) — 配置与安全提示

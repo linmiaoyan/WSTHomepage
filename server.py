@@ -1,6 +1,10 @@
 import os
 import json
+import signal
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
 from flask import Flask, request, jsonify, send_from_directory, redirect, session as web_session
 import requests
@@ -3443,7 +3447,100 @@ def api_schoolisover_token():
         return jsonify({'ok': False, 'msg': str(e)}), 500
 
 
-if __name__ == '__main__':
+def _shutdown_stack_procs(procs: list) -> None:
+    for _name, p in procs:
+        if p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+
+def _run_flask_dev_server():
     _main_port = int(_env_get("PORT", "8000") or "8000")
     _flask_debug = str(_env_get("DEBUG", "0")).strip().lower() in ("1", "true", "yes", "on")
-    app.run(host='0.0.0.0', port=_main_port, debug=_flask_debug, threaded=True)
+    app.run(host="0.0.0.0", port=_main_port, debug=_flask_debug, threaded=True)
+
+
+def _stack_env_enabled() -> bool:
+    return str(_env_get("START_STACK", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _run_start_stack() -> None:
+    """
+    同原 run_stack：拉起 vendor QuickVote + TeacherDataSystem 子进程，再拉起本站的 Flask 子进程。
+    当前进程不监听端口，只等待主站子进程结束并负责收尾。
+    """
+    base = Path(__file__).resolve().parent
+    main_port = int(_env_get("PORT", "8000") or "8000")
+    qv_port = int(_env_get("QUICKVOTE_PORT", "8001") or "8001")
+    td_port = int(_env_get("TEACHERDATA_PORT", "8002") or "8002")
+    qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "vendor" / "QuickVote")))
+    td_root = Path(_env_get("TEACHERDATA_ROOT", str(base / "vendor" / "TeacherDataSystem")))
+
+    qv_app = qv_root / "app.py"
+    td_main = td_root / "app" / "main.py"
+    if not qv_app.is_file():
+        print(f"[START_STACK] 找不到 QuickVote：{qv_app}", file=sys.stderr)
+        print("请将 QuickVote 放到 vendor/QuickVote，或设置 QUICKVOTE_ROOT。", file=sys.stderr)
+        sys.exit(1)
+    if not td_main.is_file():
+        print(f"[START_STACK] 找不到 TeacherDataSystem：{td_main}", file=sys.stderr)
+        print("请将 TeacherDataSystem 放到 vendor/TeacherDataSystem，或设置 TEACHERDATA_ROOT。", file=sys.stderr)
+        sys.exit(1)
+
+    os.environ.setdefault("QUICKVOTE_PUBLIC_URL", f"http://127.0.0.1:{qv_port}/")
+    os.environ.setdefault("TEACHERDATA_PUBLIC_URL", f"http://127.0.0.1:{td_port}/")
+    os.environ["PORT"] = str(main_port)
+
+    exe = sys.executable
+    procs: list = []
+    kw: dict = {}
+    if sys.platform == "win32":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+
+    env_qv = os.environ.copy()
+    env_qv["PORT"] = str(qv_port)
+    p_qv = subprocess.Popen([exe, str(qv_app)], cwd=str(qv_root), env=env_qv, **kw)
+    procs.append(("QuickVote", p_qv))
+
+    p_td = subprocess.Popen(
+        [exe, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(td_port)],
+        cwd=str(td_root),
+        env=os.environ.copy(),
+        **kw,
+    )
+    procs.append(("TeacherDataSystem", p_td))
+
+    time.sleep(1.2)
+
+    env_main = os.environ.copy()
+    env_main["START_STACK_CHILD"] = "1"
+    env_main["PORT"] = str(main_port)
+    p_main = subprocess.Popen([exe, str(base / "server.py")], cwd=str(base), env=env_main, **kw)
+    procs.append(("WSTHompage", p_main))
+
+    def _on_sig(*_a):
+        _shutdown_stack_procs(procs)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _on_sig)
+    signal.signal(signal.SIGTERM, _on_sig)
+
+    try:
+        code = p_main.wait()
+        _shutdown_stack_procs(procs)
+        sys.exit(code or 0)
+    except KeyboardInterrupt:
+        _shutdown_stack_procs(procs)
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    if (os.environ.get("START_STACK_CHILD") or "").strip() == "1":
+        _run_flask_dev_server()
+    elif _stack_env_enabled():
+        _run_start_stack()
+    else:
+        _run_flask_dev_server()

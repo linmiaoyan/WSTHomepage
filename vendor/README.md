@@ -23,11 +23,17 @@ pip install -r vendor/TeacherDataSystem/requirements.txt
 
 ## 启动方式
 
-在项目根目录执行 **`python run_stack.py`**（或 `start_stack.bat`），会同时启动：
+在项目根目录执行（与 `start_stack.bat` 等价）：
+
+```bash
+START_STACK=1 python server.py
+```
+
+会同时启动：
 
 - 主站：`PORT`（默认 `8000`）
-- QuickVote：`QUICKVOTE_PORT`（默认 `5005`）
-- TeacherDataSystem：`TEACHERDATA_PORT`（默认 `8001`，避免与主站冲突）
+- QuickVote：`QUICKVOTE_PORT`（默认 `8001`）
+- TeacherDataSystem：`TEACHERDATA_PORT`（默认 `8002`）
 
 门户与管理中心中的「原版」入口通过 `/go/quickvote`、`/go/teacher-data-system` 跳转；请在 `.env` 中配置 **`QUICKVOTE_PUBLIC_URL`**、**`TEACHERDATA_PUBLIC_URL`** 为实际访问地址（公网或反向代理后的 URL），以便 **QuickVote 生成二维码**时指向正确主机。
 

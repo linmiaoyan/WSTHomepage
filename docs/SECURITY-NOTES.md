@@ -21,7 +21,7 @@
 | Admin page passphrase | `index.html` `ACCESS_CODE` | Use `ADMIN_GATE_CODE` in `.env` + `/api/admin-gate-check` |
 | 校园网管代理 SSRF | `/api/search-users`、`/api/reset-net-password` 曾接受任意 `baseUrl` | 默认仅用 `.env`；仅当 `CAMPUS_ALLOW_CLIENT_OVERRIDE=1` 时才接受请求体覆盖；上述接口需通过 `_admin_api_authorized()`（与管理中心口令一致） |
 | Flask `debug=True` | `server.py` 直接运行时 | 默认关闭；需要时在 `.env` 设 `DEBUG=1` |
-| TeacherDataSystem 默认管理员口令 | `config.py` | 必须设置环境变量 `ADMIN_PASSWORD`（可与主站 `.env` 同源，由 `run_stack` 继承） |
+| TeacherDataSystem 默认管理员口令 | `config.py` | 必须设置环境变量 `ADMIN_PASSWORD`（可与主站 `.env` 同源，由 `START_STACK=1 python server.py` 子进程继承） |
 
 ## If you already committed secrets
 

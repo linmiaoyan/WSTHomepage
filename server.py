@@ -570,6 +570,21 @@ def _execute_approved_queue_item(req: dict) -> dict:
         return {"ok": False, "type": t, "id": rid, "message": str(e)}
 
 
+def _auto_approve_leave_cycle_in_db(conn, rid: int) -> None:
+    """周期请假入队后立即调用平台接口并标记为已通过（无需管理员人工点通过）。"""
+    row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+    if not row:
+        return
+    req_obj = _row_to_req(row)
+    exec_obj = _execute_approved_queue_item(req_obj)
+    exec_json = json.dumps(exec_obj, ensure_ascii=False, default=str)
+    reviewed_at = _now_iso()
+    conn.execute(
+        "UPDATE requests SET status=?, reviewed_at=?, review_comment=?, execute_result=?, executed_at=? WHERE id=?",
+        ("approved", reviewed_at, "周期请假已自动通过并提交", exec_json, reviewed_at, rid),
+    )
+
+
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), 'uploads')
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
@@ -731,18 +746,10 @@ def _auto_generate_seal_result_pdf(req: dict) -> dict:
         page = doc.load_page(0)
         page_h = float(page.rect.height)
 
-        # 以 72pt 为基准边长，按图片长宽比缩放
-        pix = fitz.Pixmap(stamp_path)
-        iw = float(max(1, pix.width))
-        ih = float(max(1, pix.height))
-        pix = None
-        base = 72.0
-        if iw >= ih:
-            sw = base
-            sh = base * (ih / iw)
-        else:
-            sh = base
-            sw = base * (iw / ih)
+        # 印章统一为 4.2cm × 4.2cm（1 in = 72 pt，1 in = 2.54 cm）
+        side_pt = 4.2 * 72.0 / 2.54
+        sw = side_pt
+        sh = side_pt
 
         placed = 0
         for it in positions:
@@ -1264,8 +1271,10 @@ def api_create_request():
             "INSERT INTO requests(type, params_json, requester_json, status, created_at) VALUES(?,?,?,?,?)",
             (t, json.dumps(params, ensure_ascii=False), json.dumps(requester_snap, ensure_ascii=False), "pending", _now_iso())
         )
-        conn.commit()
         rid = cur.lastrowid
+        if t == "leave_cycle" and rid:
+            _auto_approve_leave_cycle_in_db(conn, int(rid))
+        conn.commit()
     finally:
         conn.close()
     return jsonify({'ok': True, 'id': rid})
@@ -1563,6 +1572,11 @@ def _get_chat_server_token() -> str:
     if qf and os.path.isfile(qf):
         return (_read_env_file(qf).get('CHAT_SERVER_API_TOKEN') or '').strip()
     return ""
+
+
+def _chat_llm_model() -> str:
+    """OpenAI 兼容接口所用模型名；默认 SiliconFlow 上的 Qwen2.5-7B-Instruct。"""
+    return (_env_get("CHAT_LLM_MODEL", "Pro/Qwen/Qwen2.5-7B-Instruct") or "Pro/Qwen/Qwen2.5-7B-Instruct").strip()
 
 def _get_dingtalk_cfg():
     env_defaults = _read_env_file(_env_here())
@@ -1900,14 +1914,15 @@ def auth_logout():
     return redirect("/teacher.html")
 
 
-def _call_siliconflow_chat(messages, model='deepseek-ai/DeepSeek-V2.5', max_tokens=1024, temperature=0):
+def _call_siliconflow_chat(messages, model=None, max_tokens=1024, temperature=0):
     api_key = _get_chat_server_token()
     if not api_key:
         raise ValueError('CHAT_SERVER_API_TOKEN not configured')
+    m = (model or _chat_llm_model() or "Pro/Qwen/Qwen2.5-7B-Instruct").strip()
     url = 'https://api.siliconflow.cn/v1/chat/completions'
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}
     payload = {
-        'model': model,
+        'model': m,
         'messages': messages,
         'max_tokens': max_tokens,
         'temperature': temperature,

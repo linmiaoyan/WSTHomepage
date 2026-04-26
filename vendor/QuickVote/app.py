@@ -79,7 +79,12 @@ def get_public_host():
     try:
         from flask import has_request_context, request as req
         if has_request_context() and req:
-            return f"{req.scheme}://{req.host}/"
+            # 若被主站挂载到 /quickvote，则二维码应指向 /quickvote/login/<token>
+            script_name = (req.environ or {}).get('SCRIPT_NAME') or ''
+            prefix = script_name.rstrip('/')
+            if prefix and not prefix.startswith('/'):
+                prefix = '/' + prefix
+            return f"{req.scheme}://{req.host}{prefix}/"
     except:
         pass
     # 默认值（用于生成二维码时）

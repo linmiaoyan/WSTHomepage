@@ -43,6 +43,61 @@ def _env_get(key: str, default: str = "") -> str:
         return v
     return (_read_env_file(_env_here()).get(key) or default).strip()
 
+def _infer_public_origin_from_request() -> tuple[str, str]:
+    """
+    推断当前公网访问的 (scheme, host)：
+    - 优先 X-Forwarded-Proto / X-Forwarded-Host（反向代理场景）
+    - 兜底 request.scheme / request.host
+    返回的 host 可能包含端口（如 example.com:8443）。
+    """
+    proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "http").split(",")[0].strip() or "http"
+    host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip()
+    return proto, host
+
+
+def _rewrite_localhost_url_to_current_host(url: str, default_port: int) -> str:
+    """
+    若 url 的 hostname 为 127.0.0.1/localhost（多见于默认配置或 START_STACK 本地启动），
+    且当前请求 host 不是本机地址，则把 hostname 替换为当前访问域名，保留原端口（若无端口则用 default_port）。
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    u = (url or "").strip()
+    if not u:
+        return u
+    try:
+        p = urlparse(u)
+    except Exception:
+        return u
+    if not p.scheme or not p.netloc:
+        return u
+
+    host = (p.hostname or "").strip().lower()
+    if host not in ("127.0.0.1", "localhost"):
+        return u
+    proto2, host2 = _infer_public_origin_from_request()
+    if not host2:
+        return u
+    cur_hostname = host2.split(":", 1)[0].strip().lower()
+    if cur_hostname in ("127.0.0.1", "localhost"):
+        return u
+    port = p.port or int(default_port)
+    netloc = f"{cur_hostname}:{port}"
+    return urlunparse((p.scheme or proto2, netloc, p.path or "/", p.params, p.query, p.fragment))
+
+
+def _infer_sibling_service_url_from_request(default_port: int) -> str:
+    """
+    未配置 QUICKVOTE_PUBLIC_URL / TEACHERDATA_PUBLIC_URL 时的兜底：
+    - 使用当前请求的域名（X-Forwarded-* 优先）+ 指定端口拼接出目标服务 URL
+    - 避免线上域名访问被带回 127.0.0.1
+    """
+    proto, host = _infer_public_origin_from_request()
+    if not host:
+        return f"http://127.0.0.1:{int(default_port)}/"
+    hostname = host.split(":", 1)[0].strip() or "127.0.0.1"
+    return f"{proto}://{hostname}:{int(default_port)}/"
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _web_root_env = _env_get("WEB_ROOT_DIR", "").strip()
@@ -821,7 +876,9 @@ def go_quickvote():
     """跳转至原版 QuickVote（民主测评、二维码等）。URL 由 .env 的 QUICKVOTE_PUBLIC_URL 配置。"""
     if not _admin_api_authorized():
         return redirect("/index.html", code=302)
-    u = (_env_get("QUICKVOTE_PUBLIC_URL", "http://127.0.0.1:8001").strip() or "http://127.0.0.1:8001")
+    u = (_env_get("QUICKVOTE_PUBLIC_URL", "").strip() or "").strip()
+    if not u:
+        u = _infer_sibling_service_url_from_request(default_port=int(_env_get("QUICKVOTE_PORT", "8001") or "8001"))
     return redirect(u, code=302)
 
 
@@ -830,7 +887,9 @@ def go_teacher_data_system():
     """跳转至原版 TeacherDataSystem（教师库、PDF 模板与任务等）。URL 由 .env 的 TEACHERDATA_PUBLIC_URL 配置。"""
     if not _admin_api_authorized():
         return redirect("/index.html", code=302)
-    u = (_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002")
+    u = (_env_get("TEACHERDATA_PUBLIC_URL", "").strip() or "").strip()
+    if not u:
+        u = _infer_sibling_service_url_from_request(default_port=int(_env_get("TEACHERDATA_PORT", "8002") or "8002"))
     return redirect(u, code=302)
 
 
@@ -840,7 +899,10 @@ def go_teacher_questionnaire():
     教师问卷入口（主站统一入口）。
     默认跳到 TeacherDataSystem 的教师看板；可在 .env 配置 TEACHERDATA_QUESTIONNAIRE_PATH 覆盖路径。
     """
-    base = (_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002").rstrip("/") + "/"
+    base = (_env_get("TEACHERDATA_PUBLIC_URL", "").strip() or "").strip()
+    if not base:
+        base = _infer_sibling_service_url_from_request(default_port=int(_env_get("TEACHERDATA_PORT", "8002") or "8002"))
+    base = base.rstrip("/") + "/"
     p = (_env_get("TEACHERDATA_QUESTIONNAIRE_PATH", "/teacher/dashboard").strip() or "/teacher/dashboard")
     if not p.startswith("/"):
         p = "/" + p
@@ -849,7 +911,14 @@ def go_teacher_questionnaire():
 
 
 def _teacherdata_base_url() -> str:
-    return ((_env_get("TEACHERDATA_PUBLIC_URL", "http://127.0.0.1:8002").strip() or "http://127.0.0.1:8002")).rstrip("/")
+    u = (_env_get("TEACHERDATA_PUBLIC_URL", "").strip() or "").strip()
+    if u:
+        return u.rstrip("/")
+    # 仅用于服务端去调 TeacherDataSystem API：尽量使用当前请求的域名（而非 127.0.0.1）
+    try:
+        return _infer_sibling_service_url_from_request(default_port=int(_env_get("TEACHERDATA_PORT", "8002") or "8002")).rstrip("/")
+    except Exception:
+        return "http://127.0.0.1:8002"
 
 
 def _teacherdata_root_dir() -> str:

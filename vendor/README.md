@@ -4,8 +4,8 @@ WSTHompage 主站（`server.py`）里的 `/api/quickvote/*` 与 `/api/teacher-da
 
 ## 你需要做什么
 
-1. 将 `09教育技术处/【旧项目备份】/QuickVote` **整份复制**到本目录下，命名为 **`QuickVote`**（与 `vendor/QuickVote/app.py` 同级）。
-2. 将 `09教育技术处/【旧项目备份】/TeacherDataSystem` **整份复制**到本目录下，命名为 **`TeacherDataSystem`**（与 `vendor/TeacherDataSystem/app/main.py` 同级）。
+1. 将 `09教育技术处/【旧项目备份】/QuickVote` **整份复制**到项目根目录下，命名为 **`QuickVote`**（与 `QuickVote/app.py` 同级）。
+2. 将 `09教育技术处/【旧项目备份】/TeacherDataSystem` **整份复制**到项目根目录下，命名为 **`TeacherDataSystem`**（与 `TeacherDataSystem/app/main.py` 同级）。
 
 若希望不复制、直接使用备份路径，可在项目根目录 `.env` 中设置：
 
@@ -17,8 +17,8 @@ WSTHompage 主站（`server.py`）里的 `/api/quickvote/*` 与 `/api/teacher-da
 在**同一 Python 环境**中分别安装（版本以各项目 `requirement.txt` / `requirements.txt` 为准）：
 
 ```bash
-pip install -r vendor/QuickVote/requirement.txt
-pip install -r vendor/TeacherDataSystem/requirements.txt
+pip install -r QuickVote/requirement.txt
+pip install -r TeacherDataSystem/requirements.txt
 ```
 
 ## 启动方式

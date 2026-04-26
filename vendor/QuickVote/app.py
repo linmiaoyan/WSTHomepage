@@ -193,8 +193,8 @@ def load_user(user_id):
 @app.route('/')
 def index():
     if current_user.is_authenticated and current_user.is_admin:
-        surveys = Survey.query.filter_by(is_active=True).all()
-        return render_template('admin.html', surveys=surveys)
+        # 管理员首页统一走 /admin，避免遗漏 survey_stats 导致“现有问卷”只剩计数徽章
+        return redirect(url_for('admin'))
     surveys = Survey.query.filter_by(is_active=True).all()
     return render_template('index.html', surveys=surveys)
 

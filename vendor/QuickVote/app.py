@@ -186,6 +186,8 @@ def admin_login():
     if not admin_user or not check_password_hash(admin_user.password_hash, password):
         flash('用户名或密码错误', 'danger')
         return redirect(url_for('index'))
+    # 避免匿名扫码投票模式影响管理员界面
+    session.pop('hide_nav', None)
     session['is_admin'] = True
     login_user(admin_user, remember=True)
     # 统一回到首页，由 index() 根据管理员会话渲染管理页，避免部分部署对 /admin 路由转发不一致。
@@ -194,6 +196,7 @@ def admin_login():
 @app.route('/admin_logout')
 def admin_logout():
     session.pop('is_admin', None)
+    session.pop('hide_nav', None)
     logout_user()
     return redirect(url_for('index'))
 
@@ -433,6 +436,8 @@ def login_with_qr(token):
         db.session.commit()
     
     login_user(user)
+    # 匿名扫码投票：隐藏顶部菜单（管理员入口/跳转），降低困惑
+    session['hide_nav'] = True
     return redirect(url_for('vote', survey_id=qr.survey_id))
 
 @app.route('/preview/<int:survey_id>')
@@ -460,6 +465,7 @@ def preview_survey(survey_id):
         subjective_question_prompt=survey.subjective_question_prompt,
         table_option_count=table_option_count,
         enable_quick_fill=survey.enable_quick_fill,
+        hide_nav=False,
         is_preview=True,
         saved_choices={}  # 预览模式下不需要保存选择
     )
@@ -488,6 +494,7 @@ def vote(survey_id):
         subjective_question_prompt=survey.subjective_question_prompt,
         table_option_count=table_option_count,
         enable_quick_fill=survey.enable_quick_fill,
+        hide_nav=bool(session.get('hide_nav')),
         saved_choices=saved_choices
     )
 
@@ -752,7 +759,7 @@ def submit_vote(survey_id):
 
 @app.route('/thank_you')
 def thank_you():
-    return render_template('thank_you.html')
+    return render_template('thank_you.html', hide_nav=bool(session.get('hide_nav')))
 
 @app.route('/admin/results/<int:survey_id>')
 def view_results(survey_id):

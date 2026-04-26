@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
 </head>
 <body>
+    {% set _hide_nav = hide_nav if hide_nav is defined else false %}
+    {% if not _hide_nav %}
     <nav class="top-navbar">
         <div class="nav-container">
             <a class="nav-link" href="{{ url_for('index') }}"><i class="bi bi-ui-checks-grid"></i> QuickVote 民主测评</a>
@@ -21,6 +23,7 @@
             {% endif %}
         </div>
     </nav>
+    {% endif %}
 
     <div class="main-container">
         {% with messages = get_flashed_messages(with_categories=true) %}

@@ -5,8 +5,9 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+import importlib.util
 
-from flask import Flask, request, jsonify, send_from_directory, redirect, session as web_session
+from flask import Flask, request, jsonify, send_from_directory, redirect, session as web_session, Response
 import requests
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
@@ -114,6 +115,10 @@ if not os.path.isdir(WEB_ROOT):
 
 app = Flask(__name__, static_folder=WEB_ROOT, static_url_path='')
 
+# ---- Optional single-port mounts (subsystems under same origin) ----
+# QuickVote is mounted as a WSGI sub-app at /quickvote when SINGLE_PORT=1.
+# TeacherDataSystem is proxied under /teacher-data when SINGLE_PORT=1.
+
 # ---- 敏感配置仅从环境变量或 .env 读取（勿写死在代码里）----
 EDU_CFG_PHP = _env_get("EDU_CFG_PHP", "")
 LEAVE_BASE = _env_get("LEAVE_BASE", "")
@@ -135,6 +140,122 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDVJ9RF0KKJJhpareYt7amtuQz67ASF9BUrN1Ebnm9R
 
 session = requests.Session()
 platform_session = requests.Session()
+
+
+def _env_flag(key: str, default: str = "0") -> bool:
+    return str(_env_get(key, default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _infer_public_origin_from_request() -> tuple[str, str]:
+    proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "http").split(",")[0].strip() or "http"
+    host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or request.host or "").split(",")[0].strip()
+    return proto, host
+
+
+def _public_base_url() -> str:
+    proto, host = _infer_public_origin_from_request()
+    if not host:
+        return ""
+    return f"{proto}://{host}".rstrip("/")
+
+
+def _mount_quickvote_wsgi_if_present() -> None:
+    """
+    将 vendor/QuickVote 作为 WSGI 子应用挂载到本服务同一端口：
+      - /quickvote 由 QuickVote 自己处理（包括 /quickvote/static 等）
+    这样用户无需再直接访问 8001 端口。
+    """
+    if not _env_flag("SINGLE_PORT", "1"):
+        return
+    base = Path(__file__).resolve().parent
+    qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "vendor" / "QuickVote")))
+    qv_app_path = qv_root / "app.py"
+    if not qv_app_path.is_file():
+        return
+    try:
+        from werkzeug.middleware.dispatcher import DispatcherMiddleware
+    except Exception:
+        return
+    try:
+        spec = importlib.util.spec_from_file_location("quickvote_app", str(qv_app_path))
+        if spec is None or spec.loader is None:
+            return
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        qv_app = getattr(mod, "app", None)
+        if qv_app is None:
+            return
+        app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/quickvote": qv_app})  # type: ignore[assignment]
+    except Exception:
+        # 挂载失败不影响主站启动
+        return
+
+
+def _teacherdata_internal_base_url() -> str:
+    """
+    TeacherDataSystem 进程的“内网地址”（仅用于本服务反代）。
+    默认 http://127.0.0.1:${TEACHERDATA_PORT}。
+    """
+    u = (_env_get("TEACHERDATA_INTERNAL_URL", "").strip() or "").strip()
+    if u:
+        return u.rstrip("/")
+    port = int(_env_get("TEACHERDATA_PORT", "8002") or "8002")
+    return f"http://127.0.0.1:{port}"
+
+
+def _proxy_headers_for_upstream() -> dict:
+    hop = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "host",
+    }
+    out = {}
+    for k, v in (request.headers or {}).items():
+        if k.lower() in hop:
+            continue
+        out[k] = v
+    # ensure upstream has a useful Host
+    try:
+        from urllib.parse import urlparse
+        up = urlparse(_teacherdata_internal_base_url())
+        if up.netloc:
+            out["Host"] = up.netloc
+    except Exception:
+        pass
+    return out
+
+
+def _proxy_response_from_upstream(r: requests.Response) -> Response:
+    hop = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "content-encoding",
+    }
+    headers = {}
+    for k, v in (r.headers or {}).items():
+        if k.lower() in hop:
+            continue
+        # avoid leaking upstream absolute location; best-effort rewrite into our prefix
+        if k.lower() == "location":
+            loc = (v or "").strip()
+            if loc.startswith(_teacherdata_internal_base_url()):
+                loc = "/teacher-data" + loc[len(_teacherdata_internal_base_url()) :]
+            headers[k] = loc
+        else:
+            headers[k] = v
+    return Response(r.content, status=r.status_code, headers=headers)
 
 # ---- Approval queue storage (local sqlite) ----
 APP_DB = os.path.join(os.path.dirname(__file__), 'keadmin_queue.db')

@@ -148,7 +148,19 @@ def _teacherdata_internal_base_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
-def _proxy_headers_for_upstream() -> dict:
+def _quickvote_internal_base_url() -> str:
+    """
+    QuickVote 进程的“内网地址”（仅用于本服务反代）。
+    默认 http://127.0.0.1:${QUICKVOTE_PORT}。
+    """
+    u = (_env_get("QUICKVOTE_INTERNAL_URL", "").strip() or "").strip()
+    if u:
+        return u.rstrip("/")
+    port = int(_env_get("QUICKVOTE_PORT", "8001") or "8001")
+    return f"http://127.0.0.1:{port}"
+
+
+def _proxy_headers_for_upstream(upstream_base_url: str) -> dict:
     hop = {
         "connection",
         "keep-alive",
@@ -168,7 +180,7 @@ def _proxy_headers_for_upstream() -> dict:
     # ensure upstream has a useful Host
     try:
         from urllib.parse import urlparse
-        up = urlparse(_teacherdata_internal_base_url())
+        up = urlparse(upstream_base_url)
         if up.netloc:
             out["Host"] = up.netloc
     except Exception:
@@ -176,7 +188,7 @@ def _proxy_headers_for_upstream() -> dict:
     return out
 
 
-def _proxy_response_from_upstream(r: requests.Response) -> Response:
+def _proxy_response_from_upstream(r: requests.Response, upstream_base_url: str, local_prefix: str) -> Response:
     hop = {
         "connection",
         "keep-alive",
@@ -195,12 +207,61 @@ def _proxy_response_from_upstream(r: requests.Response) -> Response:
         # avoid leaking upstream absolute location; best-effort rewrite into our prefix
         if k.lower() == "location":
             loc = (v or "").strip()
-            if loc.startswith(_teacherdata_internal_base_url()):
-                loc = "/teacher-data" + loc[len(_teacherdata_internal_base_url()) :]
+            if loc.startswith(upstream_base_url):
+                loc = local_prefix + loc[len(upstream_base_url) :]
             headers[k] = loc
         else:
             headers[k] = v
     return Response(r.content, status=r.status_code, headers=headers)
+
+
+# ---- Single-port reverse proxy routes ----
+@app.route("/quickvote/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@app.route("/quickvote/<path:path>", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+def proxy_quickvote(path: str):
+    if not _env_flag("SINGLE_PORT", "1"):
+        return jsonify({"ok": False, "msg": "SINGLE_PORT is disabled"}), 404
+    upstream = _quickvote_internal_base_url().rstrip("/")
+    url = upstream + "/" + (path or "")
+    if request.query_string:
+        url = url + ("?" + request.query_string.decode("utf-8", errors="ignore"))
+    try:
+        r = requests.request(
+            method=request.method,
+            url=url,
+            headers=_proxy_headers_for_upstream(upstream),
+            data=request.get_data(),
+            cookies=request.cookies,
+            allow_redirects=False,
+            timeout=(10, 120),
+        )
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "msg": f"QuickVote 反代失败：{e}"}), 502
+    return _proxy_response_from_upstream(r, upstream, "/quickvote")
+
+
+@app.route("/teacher-data/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@app.route("/teacher-data/<path:path>", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+def proxy_teacherdata(path: str):
+    if not _env_flag("SINGLE_PORT", "1"):
+        return jsonify({"ok": False, "msg": "SINGLE_PORT is disabled"}), 404
+    upstream = _teacherdata_internal_base_url().rstrip("/")
+    url = upstream + "/" + (path or "")
+    if request.query_string:
+        url = url + ("?" + request.query_string.decode("utf-8", errors="ignore"))
+    try:
+        r = requests.request(
+            method=request.method,
+            url=url,
+            headers=_proxy_headers_for_upstream(upstream),
+            data=request.get_data(),
+            cookies=request.cookies,
+            allow_redirects=False,
+            timeout=(10, 120),
+        )
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "msg": f"TeacherDataSystem 反代失败：{e}"}), 502
+    return _proxy_response_from_upstream(r, upstream, "/teacher-data")
 
 # ---- Approval queue storage (local sqlite) ----
 APP_DB = os.path.join(os.path.dirname(__file__), 'keadmin_queue.db')

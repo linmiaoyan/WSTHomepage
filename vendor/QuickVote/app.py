@@ -37,6 +37,7 @@ os.makedirs(INSTANCE_DIR, exist_ok=True)
 PUBLIC_HOST = os.getenv('PUBLIC_HOST', '')  # 如果为空，将动态获取
 SECRET_KEY = os.getenv('SECRET_KEY', secrets.token_hex(32))
 ADMIN_GATE_KEY = os.getenv('ADMIN_GATE_KEY', 'wzkjgz')
+PORTAL_HOME_URL = os.getenv('PORTAL_HOME_URL', '').strip()  # 门户首页地址（可选）
 DATABASE_PATH = os.path.join(INSTANCE_DIR, 'votes.db')
 HOST = os.getenv('HOST', '0.0.0.0')
 PORT = int(os.getenv('PORT', 5005))
@@ -84,6 +85,30 @@ def get_public_host():
         pass
     # 默认值（用于生成二维码时）
     return f"http://localhost:{PORT}/"
+
+
+def get_portal_home_url() -> str:
+    """
+    门户首页链接：
+    - 优先使用环境变量 PORTAL_HOME_URL（便于部署到任意域名/路径）
+    - 否则基于当前请求 Host 推断到同域名的 8000/home.html（全栈默认主站端口）
+    """
+    if PORTAL_HOME_URL:
+        return PORTAL_HOME_URL
+    try:
+        h = (request.headers.get('X-Forwarded-Host') or request.host or '').split(',')[0].strip()
+        proto = (request.headers.get('X-Forwarded-Proto') or request.scheme or 'http').split(',')[0].strip()
+        if not h:
+            return '/home.html'
+        hostname = h.split(':', 1)[0].strip()
+        return f"{proto}://{hostname}:8000/home.html"
+    except Exception:
+        return '/home.html'
+
+
+@app.context_processor
+def inject_common_links():
+    return {'portal_home_url': get_portal_home_url()}
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()

@@ -16,7 +16,7 @@
     <nav class="top-navbar">
         <div class="nav-container">
             <a class="nav-link" href="{{ url_for('index') }}"><i class="bi bi-ui-checks-grid"></i> QuickVote 民主测评</a>
-            <a class="nav-link" href="http://www.wzkjgz.site:8000/home.html"><i class="bi bi-house-door"></i> 门户首页</a>
+            <a class="nav-link" href="{{ portal_home_url or '/' }}"><i class="bi bi-house-door"></i> 门户首页</a>
             {% if session.get('is_admin') or (current_user.is_authenticated and current_user.is_admin) %}
             <a class="nav-link" href="{{ url_for('admin') }}"><i class="bi bi-speedometer2"></i> 管理面板</a>
             <a class="nav-link" href="{{ url_for('admin_logout') }}"><i class="bi bi-box-arrow-right"></i> 退出登录</a>

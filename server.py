@@ -292,7 +292,21 @@ def proxy_quickvote(path: str):
         )
     except requests.RequestException as e:
         return jsonify({"ok": False, "msg": f"QuickVote 反代失败：{e}"}), 502
-    return _proxy_response_from_upstream(r, upstream, "/quickvote")
+    resp = _proxy_response_from_upstream(r, upstream, "/quickvote")
+    # QuickVote 静态资源默认走 /static/*；在单端口前缀下需要改为 /quickvote/static/*
+    try:
+        if resp.mimetype and "text/html" in resp.mimetype.lower():
+            txt = resp.get_data(as_text=True)
+            if txt:
+                txt = txt.replace('href="/static/', 'href="/quickvote/static/')
+                txt = txt.replace("href='/static/", "href='/quickvote/static/")
+                txt = txt.replace('src="/static/', 'src="/quickvote/static/')
+                txt = txt.replace("src='/static/", "src='/quickvote/static/")
+                resp.set_data(txt)
+                resp.headers["Content-Length"] = str(len(resp.get_data()))
+    except Exception:
+        pass
+    return resp
 
 
 @app.route("/teacher-data/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

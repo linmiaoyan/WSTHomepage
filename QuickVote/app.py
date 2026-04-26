@@ -43,7 +43,11 @@ HOST = os.getenv('HOST', '0.0.0.0')
 PORT = int(os.getenv('PORT', 5005))
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
+URL_PREFIX = (os.getenv("URL_PREFIX", "").strip() or "").rstrip("/")
 app = Flask(__name__)
+if URL_PREFIX:
+    app.config["APPLICATION_ROOT"] = URL_PREFIX
+    app.static_url_path = URL_PREFIX + "/static"
 app.config['SECRET_KEY'] = SECRET_KEY
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATABASE_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False

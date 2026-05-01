@@ -17,6 +17,11 @@
 - 在根目录按各功能需要配置 `.env`；密钥与本地 `.db` 勿提交（见 `.gitignore`）。
 - 大模型等密钥变量名以 `server.py` 中 `_env_get` 为准。
 
+### 多管理组与口令（可选）
+
+- 在 `.env` 设置 **`ADMIN_MASTER_CODE`**（主管理员口令）后，启用多管理组模式：各组口令与权限保存在 `keadmin_queue.db` 的 `admin_groups` 表；主管理员在「管理中心 → 管理组与口令」中配置。
+- 未设置 `ADMIN_MASTER_CODE` 时，仍可使用单一 **`ADMIN_GATE_CODE`**（旧行为，等同全部权限）。
+
 ## 启动
 
 ### 仅主站

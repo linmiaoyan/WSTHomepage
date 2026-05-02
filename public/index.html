@@ -153,20 +153,23 @@
 
     <div class="tab-bar" id="tabBar" style="display:none;">
         <div class="tab-row-label">审批队列</div>
-        <button type="button" class="tab-btn active" data-page="/pages/admin-review.html"><i class="bi bi-inboxes"></i> 全部待办</button>
-        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=add_vehicle"><i class="bi bi-car-front"></i> 审批 · 车牌</button>
-        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=leave_cycle"><i class="bi bi-calendar2-week"></i> 审批 · 周期请假</button>
-        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=reset_net_password"><i class="bi bi-key"></i> 审批 · 网络密码</button>
-        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=seal"><i class="bi bi-patch-check"></i> 审批 · 校章</button>
+        <button type="button" class="tab-btn active" data-page="/pages/admin-review.html" data-perm="review_all"><i class="bi bi-inboxes"></i> 全部待办</button>
+        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=add_vehicle" data-perm="review_vehicle"><i class="bi bi-car-front"></i> 审批 · 车牌</button>
+        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=leave_cycle" data-perm="review_leave"><i class="bi bi-calendar2-week"></i> 审批 · 周期请假</button>
+        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=reset_net_password" data-perm="review_net"><i class="bi bi-key"></i> 审批 · 网络密码</button>
+        <button type="button" class="tab-btn" data-page="/pages/admin-review.html?type=seal" data-perm="review_seal"><i class="bi bi-patch-check"></i> 审批 · 校章</button>
 
         <div class="tab-row-label">原版子系统</div>
-        <a class="tab-btn tab-external" href="/quickvote/" target="_blank" rel="noopener"><i class="bi bi-qr-code"></i> 原版 QuickVote</a>
-        <a class="tab-btn tab-external" href="/teacher-data/" target="_blank" rel="noopener"><i class="bi bi-database"></i> 原版 TeacherDataSystem</a>
+        <a class="tab-btn tab-external" href="/quickvote/" target="_blank" rel="noopener" data-perm="admin_external"><i class="bi bi-qr-code"></i> 原版 QuickVote</a>
+        <a class="tab-btn tab-external" href="/teacher-data/" target="_blank" rel="noopener" data-perm="admin_external"><i class="bi bi-database"></i> 原版 TeacherDataSystem</a>
 
         <div class="tab-row-label">快捷操作</div>
-        <button type="button" class="tab-btn" data-page="/pages/add-vehicle.html"><i class="bi bi-plus-circle"></i> 添加职工车牌</button>
-        <button type="button" class="tab-btn" data-page="/pages/reset-password.html"><i class="bi bi-arrow-repeat"></i> 重置网络密码</button>
-        <button type="button" class="tab-btn" data-page="/pages/leave-cycle.html"><i class="bi bi-calendar2-check"></i> 学生周期请假</button>
+        <button type="button" class="tab-btn" data-page="/pages/add-vehicle.html" data-perm="admin_quick_ops"><i class="bi bi-plus-circle"></i> 添加职工车牌</button>
+        <button type="button" class="tab-btn" data-page="/pages/reset-password.html" data-perm="admin_quick_ops"><i class="bi bi-arrow-repeat"></i> 重置网络密码</button>
+        <button type="button" class="tab-btn" data-page="/pages/leave-cycle.html" data-perm="admin_quick_ops"><i class="bi bi-calendar2-check"></i> 学生周期请假</button>
+
+        <div class="tab-row-label">系统</div>
+        <button type="button" class="tab-btn" data-page="/pages/admin-groups.html" data-perm="admin_groups"><i class="bi bi-people"></i> 管理组与口令</button>
     </div>
 
     <div class="page-frame-wrap" id="frameWrap" style="display:none;">
@@ -176,7 +179,7 @@
     <div class="gate-overlay" id="gate">
         <div class="gate-card">
             <div class="gate-title">访问口令校验</div>
-            <div class="gate-desc">请输入本页专用口令后继续访问。</div>
+            <div class="gate-desc" id="gateDesc">请输入本页专用口令后继续访问。多管理组模式下：主管理员口令（.env 中 ADMIN_MASTER_CODE）或各组口令。</div>
             <input type="password" id="gateCode" class="gate-input" placeholder="请输入访问口令" />
             <button type="button" id="gateBtn" class="gate-btn">进入管理中心</button>
             <div id="gateError" class="gate-error"></div>
@@ -203,9 +206,33 @@
             var frameWrap = document.getElementById("frameWrap");
             var tabs = document.querySelectorAll(".tab-btn[data-page]");
 
+            function applyTabPermissions(perms) {
+                var open = !!(perms && perms.logged_in === false);
+                var master = !!(perms && perms.master);
+                var pset = {};
+                if (perms && Array.isArray(perms.permissions)) {
+                    perms.permissions.forEach(function (x) { pset[String(x)] = true; });
+                }
+                document.querySelectorAll("#tabBar [data-perm]").forEach(function (el) {
+                    var k = el.getAttribute("data-perm");
+                    var show = open || master || (k && pset[k]);
+                    el.style.display = show ? "" : "none";
+                });
+                var firstVis = null;
+                document.querySelectorAll(".tab-btn[data-page]").forEach(function (b) {
+                    if (b.offsetParent !== null && !firstVis) firstVis = b;
+                });
+                document.querySelectorAll(".tab-btn[data-page]").forEach(function (b) { b.classList.remove("active"); });
+                if (firstVis) {
+                    firstVis.classList.add("active");
+                    frame.src = firstVis.getAttribute("data-page");
+                } else {
+                    frame.src = "/pages/admin-review.html";
+                }
+            }
+
             function initTabs() {
-                var first = document.querySelector(".tab-btn[data-page].active");
-                frame.src = first ? first.getAttribute("data-page") : "/pages/admin-review.html";
+                tabs = document.querySelectorAll(".tab-btn[data-page]");
                 tabBar.style.display = "";
                 frameWrap.style.display = "";
                 tabs.forEach(function (btn) {
@@ -222,14 +249,35 @@
                 if (window.localStorage) {
                     localStorage.setItem(STORAGE_KEY, "1");
                 }
-                initTabs();
+                fetch("/api/admin/session")
+                    .then(function (r) { return r.json(); })
+                    .then(function (sess) {
+                        applyTabPermissions(sess);
+                        initTabs();
+                    })
+                    .catch(function () {
+                        initTabs();
+                    });
             }
 
             fetch("/api/admin-gate-status")
                 .then(function (r) { return r.json(); })
                 .then(function (st) {
+                    var gd = document.getElementById("gateDesc");
+                    if (st && st.multi_group && gd) {
+                        gd.textContent = "请输入主管理员口令（ADMIN_MASTER_CODE）或某管理组口令。";
+                    }
                     if (!st || !st.gate_enabled) {
-                        unlock();
+                        fetch("/api/admin/session")
+                            .then(function (r) { return r.json(); })
+                            .then(function (sess) {
+                                gate.style.display = "none";
+                                applyTabPermissions(sess);
+                                initTabs();
+                            })
+                            .catch(function () {
+                                unlock();
+                            });
                         return;
                     }
                     try {
@@ -249,7 +297,12 @@
                             headers: { "content-type": "application/json" },
                             body: JSON.stringify({ code: v })
                         })
-                            .then(function (r) { return r.json(); })
+                            .then(function (r) {
+                                return r.json().then(function (d) {
+                                    if (!r.ok) throw new Error((d && d.msg) || "校验失败");
+                                    return d;
+                                });
+                            })
                             .then(function (d) {
                                 if (d && (d.ok || d.skip)) {
                                     gateError.textContent = "";
@@ -258,8 +311,8 @@
                                     gateError.textContent = "口令错误";
                                 }
                             })
-                            .catch(function () {
-                                gateError.textContent = "校验失败，请稍后重试";
+                            .catch(function (e) {
+                                gateError.textContent = (e && e.message) ? e.message : "校验失败，请稍后重试";
                             })
                             .finally(function () {
                                 gateBtn.disabled = false;

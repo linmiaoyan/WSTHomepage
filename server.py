@@ -17,6 +17,7 @@ import re
 import time
 import sqlite3
 import uuid
+import secrets
 from urllib.parse import urlencode, urljoin
 
 
@@ -363,13 +364,133 @@ def _init_queue_db():
             conn.execute("ALTER TABLE requests ADD COLUMN execute_result TEXT")
         if "executed_at" not in cols:
             conn.execute("ALTER TABLE requests ADD COLUMN executed_at TEXT")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS admin_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          slug TEXT NOT NULL UNIQUE,
+          code_hash TEXT NOT NULL,
+          permissions_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """)
         conn.commit()
     finally:
         conn.close()
 
 _init_queue_db()
 
+# ---- 管理组权限（与前端 tab / API 对应）----
+_ADMIN_PERM_KEYS = (
+    "review_all",
+    "review_vehicle",
+    "review_leave",
+    "review_net",
+    "review_seal",
+    "admin_quick_ops",
+    "admin_external",
+    "admin_groups",
+)
 
+
+def _admin_master_code_expected() -> str:
+    return (_env_get("ADMIN_MASTER_CODE", "") or "").strip()
+
+
+def _admin_multi_role_enabled() -> bool:
+    """启用多管理组：在 .env 设置 ADMIN_MASTER_CODE（主管理员口令），并在库中配置 admin_groups。"""
+    return bool(_admin_master_code_expected())
+
+
+def _admin_legacy_gate_only() -> bool:
+    """仅使用单一 ADMIN_GATE_CODE（旧行为），且未启用多管理组。"""
+    return bool(_admin_gate_expected()) and not _admin_multi_role_enabled()
+
+
+def _session_admin_perms() -> set:
+    raw = web_session.get("ke_admin_perms")
+    if not isinstance(raw, list):
+        return set()
+    return {str(x) for x in raw if x}
+
+
+def _session_admin_is_master() -> bool:
+    return bool(web_session.get("ke_admin_master"))
+
+
+def _session_admin_group_id():
+    v = web_session.get("ke_admin_group_id")
+    try:
+        return int(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _hash_admin_code(plain: str) -> str:
+    return hashlib.sha256(("keadmin1:" + (plain or "")).encode("utf-8")).hexdigest()
+
+
+def _default_full_perms() -> list:
+    return list(_ADMIN_PERM_KEYS)
+
+
+def _parse_perms_json(s: str) -> list:
+    try:
+        j = json.loads(s or "[]")
+        if isinstance(j, list):
+            return [str(x) for x in j if str(x) in _ADMIN_PERM_KEYS]
+    except Exception:
+        pass
+    return []
+
+
+def _row_to_admin_group(row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "name": str(row["name"] or ""),
+        "slug": str(row["slug"] or ""),
+        "permissions": _parse_perms_json(row["permissions_json"] or "[]"),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _admin_is_super() -> bool:
+    """主管理员、或未启用多组时的「已通过口令」管理员（等同全部权限）。"""
+    if _session_admin_is_master():
+        return True
+    if _admin_multi_role_enabled():
+        return False
+    if not _admin_gate_expected():
+        return True
+    return bool(web_session.get("ke_admin_gate_ok"))
+
+
+def _admin_has_perm(key: str) -> bool:
+    if _admin_is_super():
+        return True
+    p = _session_admin_perms()
+    if not p:
+        return False
+    if "review_all" in p and str(key).startswith("review_"):
+        return True
+    return key in p
+
+
+def _admin_can_review_type(t: str) -> bool:
+    tt = (t or "").strip()
+    if _admin_is_super():
+        return True
+    if _admin_has_perm("review_all"):
+        return True
+    mp = {
+        "add_vehicle": "review_vehicle",
+        "leave_cycle": "review_leave",
+        "reset_net_password": "review_net",
+        "seal": "review_seal",
+    }
+    return _admin_has_perm(mp.get(tt, ""))
 
 
 def _now_iso():
@@ -407,10 +528,36 @@ def _admin_gate_expected() -> str:
     return (_env_get("ADMIN_GATE_CODE", "") or "").strip()
 
 
+def _admin_clear_gate_session():
+    web_session.pop("ke_admin_gate_ok", None)
+    web_session.pop("ke_admin_master", None)
+    web_session.pop("ke_admin_group_id", None)
+    web_session.pop("ke_admin_perms", None)
+
+
+def _admin_set_master_session():
+    web_session["ke_admin_gate_ok"] = True
+    web_session["ke_admin_master"] = True
+    web_session.pop("ke_admin_group_id", None)
+    web_session["ke_admin_perms"] = _default_full_perms()
+
+
+def _admin_set_group_session(gid: int, perms: list):
+    web_session["ke_admin_gate_ok"] = True
+    web_session.pop("ke_admin_master", None)
+    web_session["ke_admin_group_id"] = int(gid)
+    web_session["ke_admin_perms"] = list(perms or [])
+
+
 def _admin_api_authorized() -> bool:
-    """未配置 ADMIN_GATE_CODE 时保持兼容（与旧行为一致）；配置后须先通过口令校验写入 session。"""
-    exp = _admin_gate_expected()
-    if not exp:
+    """已通过管理中心口令（旧单一口令或多管理组之一）。"""
+    if _admin_legacy_gate_only():
+        return bool(web_session.get("ke_admin_gate_ok"))
+    if _admin_multi_role_enabled():
+        return bool(web_session.get("ke_admin_gate_ok")) and (
+            _session_admin_is_master() or _session_admin_group_id() is not None
+        )
+    if not _admin_gate_expected():
         return True
     return bool(web_session.get("ke_admin_gate_ok"))
 
@@ -917,6 +1064,8 @@ def api_admin_seal_stamp():
     """管理员上传校章图，固定覆盖保存；之后教师端与占位逻辑均读同一文件。"""
     if not _admin_api_authorized():
         return _admin_api_denied_response()
+    if not _admin_has_perm("review_seal"):
+        return jsonify({"ok": False, "msg": "无校章相关权限"}), 403
     f = request.files.get("image") or request.files.get("file")
     if not f or not f.filename:
         return jsonify({"ok": False, "msg": "缺少图片文件"}), 400
@@ -1045,32 +1194,199 @@ def _auto_generate_seal_result_pdf(req: dict) -> dict:
 
 @app.route('/api/admin-gate-status', methods=['GET'])
 def api_admin_gate_status():
-    """是否启用管理中心口令（由 .env 的 ADMIN_GATE_CODE 是否非空决定）。"""
-    return jsonify({'gate_enabled': bool(_env_get("ADMIN_GATE_CODE", ""))})
+    """是否需要在管理中心入口输入口令；多管理组模式下由 ADMIN_MASTER_CODE 决定。"""
+    if _admin_multi_role_enabled():
+        return jsonify({"gate_enabled": True, "multi_group": True})
+    return jsonify({"gate_enabled": bool(_env_get("ADMIN_GATE_CODE", "")), "multi_group": False})
 
 
 @app.route('/api/admin-gate-check', methods=['POST'])
 def api_admin_gate_check():
     """
-    管理中心 index.html 口令：期望值来自 .env 的 ADMIN_GATE_CODE。
-    若未配置 ADMIN_GATE_CODE（空），则返回 skip=true，前端可不拦截（公网请务必配置）。
+    管理中心 index.html 口令。
+    - 多管理组：code 为主管理员口令（ADMIN_MASTER_CODE）或某管理组口令（admin_groups 表）。
+    - 旧模式：code 与 ADMIN_GATE_CODE 一致。
     """
     data = request.get_json(force=True, silent=True) or {}
-    code = (data.get('code') or '').strip()
+    code = (data.get("code") or "").strip()
+    if not code:
+        return jsonify({"ok": False, "msg": "口令为空"}), 400
+
+    if _admin_multi_role_enabled():
+        master = _admin_master_code_expected()
+        if code == master:
+            _admin_set_master_session()
+            return jsonify({"ok": True, "role": "master", "permissions": _default_full_perms()})
+        conn = _db()
+        try:
+            rows = conn.execute("SELECT id, code_hash, permissions_json FROM admin_groups").fetchall()
+        finally:
+            conn.close()
+        h = _hash_admin_code(code)
+        for row in rows:
+            if str(row["code_hash"] or "") == h:
+                gid = int(row["id"])
+                perms = _parse_perms_json(row["permissions_json"] or "[]")
+                if not perms:
+                    perms = _default_full_perms()
+                _admin_set_group_session(gid, perms)
+                return jsonify({"ok": True, "role": "group", "group_id": gid, "permissions": perms})
+        return jsonify({"ok": False, "msg": "口令错误"}), 400
+
     expected = _env_get("ADMIN_GATE_CODE", "")
     if not expected:
-        web_session.pop("ke_admin_gate_ok", None)
-        return jsonify({'ok': True, 'skip': True})
+        _admin_clear_gate_session()
+        return jsonify({"ok": True, "skip": True})
     ok = code == expected
     if ok:
-        web_session["ke_admin_gate_ok"] = True
-    return jsonify({'ok': ok})
+        _admin_set_master_session()
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/admin/session", methods=["GET"])
+def api_admin_session():
+    """当前管理端会话：是否主管理员、权限列表（供 index.html 显示标签）。"""
+    if not web_session.get("ke_admin_gate_ok"):
+        # 未配置口令时等同「全开」（与旧行为一致）
+        if not _admin_gate_expected() and not _admin_multi_role_enabled():
+            return jsonify(
+                {
+                    "ok": True,
+                    "logged_in": True,
+                    "master": True,
+                    "group_id": None,
+                    "permissions": _default_full_perms(),
+                    "perm_keys": list(_ADMIN_PERM_KEYS),
+                }
+            )
+        return jsonify({"ok": True, "logged_in": False})
+    return jsonify(
+        {
+            "ok": True,
+            "logged_in": True,
+            "master": bool(_session_admin_is_master()),
+            "group_id": _session_admin_group_id(),
+            "permissions": list(_session_admin_perms()),
+            "perm_keys": list(_ADMIN_PERM_KEYS),
+        }
+    )
+
+
+def _require_master_for_groups_api():
+    if not web_session.get("ke_admin_gate_ok") or not _session_admin_is_master():
+        return jsonify({"ok": False, "msg": "需要主管理员口令（ADMIN_MASTER_CODE）"}), 403
+    return None
+
+
+@app.route("/api/admin/groups", methods=["GET"])
+def api_admin_groups_list():
+    g = _require_master_for_groups_api()
+    if g:
+        return g
+    conn = _db()
+    try:
+        rows = conn.execute("SELECT * FROM admin_groups ORDER BY id ASC").fetchall()
+        return jsonify({"ok": True, "data": [_row_to_admin_group(r) for r in rows]})
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/groups", methods=["POST"])
+def api_admin_groups_create():
+    g = _require_master_for_groups_api()
+    if g:
+        return g
+    if not _admin_multi_role_enabled():
+        return jsonify({"ok": False, "msg": "未启用多管理组：请在 .env 设置 ADMIN_MASTER_CODE"}), 400
+    data = request.get_json(force=True, silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    slug = str(data.get("slug") or "").strip().lower()
+    plain = (data.get("code") or data.get("password") or "").strip()
+    perms = data.get("permissions")
+    if not name or not slug or not plain:
+        return jsonify({"ok": False, "msg": "name、slug、code 均不能为空"}), 400
+    if not re.match(r"^[a-z0-9_-]{1,64}$", slug):
+        return jsonify({"ok": False, "msg": "slug 仅允许小写字母数字、下划线、短横线"}), 400
+    if isinstance(perms, list):
+        plist = [str(x) for x in perms if str(x) in _ADMIN_PERM_KEYS]
+    else:
+        plist = _default_full_perms()
+    if not plist:
+        plist = _default_full_perms()
+    ts = _now_iso()
+    conn = _db()
+    try:
+        conn.execute(
+            "INSERT INTO admin_groups(name, slug, code_hash, permissions_json, created_at, updated_at) VALUES(?,?,?,?,?,?)",
+            (name, slug, _hash_admin_code(plain), json.dumps(plist, ensure_ascii=False), ts, ts),
+        )
+        conn.commit()
+        rid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        row = conn.execute("SELECT * FROM admin_groups WHERE id=?", (rid,)).fetchone()
+        return jsonify({"ok": True, "data": _row_to_admin_group(row)})
+    except sqlite3.IntegrityError:
+        return jsonify({"ok": False, "msg": "slug 已存在"}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/groups/<int:gid>", methods=["PATCH"])
+def api_admin_groups_patch(gid: int):
+    g = _require_master_for_groups_api()
+    if g:
+        return g
+    data = request.get_json(force=True, silent=True) or {}
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM admin_groups WHERE id=?", (gid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "msg": "not found"}), 404
+        name = str(data.get("name") or row["name"] or "").strip()
+        plain = (data.get("code") or data.get("password") or "").strip()
+        perms = data.get("permissions")
+        plist = _parse_perms_json(row["permissions_json"] or "[]")
+        if isinstance(perms, list):
+            plist = [str(x) for x in perms if str(x) in _ADMIN_PERM_KEYS]
+        if not plist:
+            plist = _default_full_perms()
+        ts = _now_iso()
+        if plain:
+            conn.execute(
+                "UPDATE admin_groups SET name=?, code_hash=?, permissions_json=?, updated_at=? WHERE id=?",
+                (name, _hash_admin_code(plain), json.dumps(plist, ensure_ascii=False), ts, gid),
+            )
+        else:
+            conn.execute(
+                "UPDATE admin_groups SET name=?, permissions_json=?, updated_at=? WHERE id=?",
+                (name, json.dumps(plist, ensure_ascii=False), ts, gid),
+            )
+        conn.commit()
+        row2 = conn.execute("SELECT * FROM admin_groups WHERE id=?", (gid,)).fetchone()
+        return jsonify({"ok": True, "data": _row_to_admin_group(row2)})
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/groups/<int:gid>", methods=["DELETE"])
+def api_admin_groups_delete(gid: int):
+    g = _require_master_for_groups_api()
+    if g:
+        return g
+    conn = _db()
+    try:
+        conn.execute("DELETE FROM admin_groups WHERE id=?", (gid,))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 
 @app.route("/go/quickvote")
 def go_quickvote():
     """跳转至原版 QuickVote（民主测评、二维码等）。URL 由 .env 的 QUICKVOTE_PUBLIC_URL 配置。"""
     if not _admin_api_authorized():
+        return redirect("/index.html", code=302)
+    if not _admin_has_perm("admin_external"):
         return redirect("/index.html", code=302)
     u = (_env_get("QUICKVOTE_PUBLIC_URL", "").strip() or "").strip()
     if not u:
@@ -1082,6 +1398,8 @@ def go_quickvote():
 def go_teacher_data_system():
     """跳转至原版 TeacherDataSystem（教师库、PDF 模板与任务等）。URL 由 .env 的 TEACHERDATA_PUBLIC_URL 配置。"""
     if not _admin_api_authorized():
+        return redirect("/index.html", code=302)
+    if not _admin_has_perm("admin_external"):
         return redirect("/index.html", code=302)
     u = (_env_get("TEACHERDATA_PUBLIC_URL", "").strip() or "").strip()
     if not u:
@@ -1612,7 +1930,10 @@ def api_admin_list_requests():
             rows = conn.execute("SELECT * FROM requests WHERE status=? ORDER BY id DESC LIMIT 200", (status,)).fetchall()
         else:
             rows = conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT 200").fetchall()
-        return jsonify([_row_to_req(r) for r in rows])
+        out = [_row_to_req(r) for r in rows]
+        if not _admin_is_super():
+            out = [x for x in out if _admin_can_review_type(str(x.get("type") or ""))]
+        return jsonify(out)
     finally:
         conn.close()
 
@@ -1662,7 +1983,10 @@ def api_admin_get_request(rid: int):
         row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'not found'}), 404
-        return jsonify({'ok': True, 'data': _row_to_req(row)})
+        req_obj = _row_to_req(row)
+        if not _admin_can_review_type(str(req_obj.get("type") or "")):
+            return jsonify({"ok": False, "msg": "无权限查看该类型申请"}), 403
+        return jsonify({'ok': True, 'data': req_obj})
     finally:
         conn.close()
 
@@ -1681,10 +2005,12 @@ def api_admin_review_request(rid: int):
         row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'msg': 'not found'}), 404
+        req_obj = _row_to_req(row)
+        if not _admin_can_review_type(str(req_obj.get("type") or "")):
+            return jsonify({"ok": False, "msg": "无权限审批该类型申请"}), 403
         reviewed_at = _now_iso()
         exec_obj = None
         if st == "approved":
-            req_obj = _row_to_req(row)
             exec_obj = _execute_approved_queue_item(req_obj)
             if str(req_obj.get("type") or "") == "seal":
                 if not isinstance(exec_obj, dict) or not bool(exec_obj.get("ok")):
@@ -1722,6 +2048,8 @@ def api_admin_upload_seal_result(rid: int):
     """管理员上传盖章后的 PDF，保存后教师端可下载。"""
     if not _admin_api_authorized():
         return _admin_api_denied_response()
+    if not _admin_has_perm("review_seal"):
+        return jsonify({"ok": False, "msg": "无校章审批权限"}), 403
     f = request.files.get("pdf") or request.files.get("file")
     if not f or not f.filename:
         return jsonify({"ok": False, "msg": "缺少 pdf 文件"}), 400
@@ -1774,6 +2102,8 @@ def api_admin_patch_add_vehicle_request(rid: int):
     """
     if not _admin_api_authorized():
         return _admin_api_denied_response()
+    if not _admin_has_perm("review_vehicle"):
+        return jsonify({"ok": False, "msg": "无车牌审批权限"}), 403
     data = request.get_json(force=True, silent=True) or {}
     conn = _db()
     try:
@@ -2179,7 +2509,7 @@ def auth_logout():
     web_session.pop("dt_user", None)
     web_session.pop("dt_oauth_state", None)
     web_session.pop("dt_next", None)
-    web_session.pop("ke_admin_gate_ok", None)
+    _admin_clear_gate_session()
     return redirect("/teacher.html")
 
 
@@ -3600,6 +3930,8 @@ def api_dept_auth_child():
 def api_search_users():
     if not _admin_api_authorized():
         return _admin_api_denied_response()
+    if not _admin_has_perm("admin_quick_ops"):
+        return jsonify({"code": 403, "msg": "无快捷操作权限"}), 403
     data = request.get_json(force=True, silent=True) or {}
     campus_base, campus_token = _campus_cfg_from_request(data)
     if not campus_base or not campus_token:
@@ -3652,6 +3984,8 @@ def api_search_users():
 def api_reset_net_password():
     if not _admin_api_authorized():
         return _admin_api_denied_response()
+    if not _admin_has_perm("admin_quick_ops"):
+        return jsonify({"code": 403, "msg": "无快捷操作权限"}), 403
     data = request.get_json(force=True, silent=True) or {}
     campus_base, campus_token = _campus_cfg_from_request(data)
     if not campus_base or not campus_token:

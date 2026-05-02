@@ -162,14 +162,14 @@ def _public_base_url() -> str:
 
 def _mount_quickvote_wsgi_if_present() -> None:
     """
-    将 vendor/QuickVote 作为 WSGI 子应用挂载到本服务同一端口：
+    将 QuickVote 作为 WSGI 子应用挂载到本服务同一端口：
       - /quickvote 由 QuickVote 自己处理（包括 /quickvote/static 等）
     这样用户无需再直接访问 8001 端口。
     """
     if not _env_flag("SINGLE_PORT", "1"):
         return
     base = Path(__file__).resolve().parent
-    qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "vendor" / "QuickVote")))
+    qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "QuickVote")))
     qv_app_path = qv_root / "app.py"
     if not qv_app_path.is_file():
         return
@@ -1441,7 +1441,7 @@ def _teacherdata_root_dir() -> str:
         if os.path.isabs(r):
             return r
         return os.path.join(BASE_DIR, r)
-    return os.path.join(BASE_DIR, "vendor", "TeacherDataSystem")
+    return os.path.join(BASE_DIR, "TeacherDataSystem")
 
 
 def _teacherdata_db_path() -> str:
@@ -4075,18 +4075,18 @@ def _run_start_stack() -> None:
     main_port = int(_env_get("PORT", "8000") or "8000")
     qv_port = int(_env_get("QUICKVOTE_PORT", "8001") or "8001")
     td_port = int(_env_get("TEACHERDATA_PORT", "8002") or "8002")
-    qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "vendor" / "QuickVote")))
-    td_root = Path(_env_get("TEACHERDATA_ROOT", str(base / "vendor" / "TeacherDataSystem")))
+    qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "QuickVote")))
+    td_root = Path(_env_get("TEACHERDATA_ROOT", str(base / "TeacherDataSystem")))
 
     qv_app = qv_root / "app.py"
     td_main = td_root / "app" / "main.py"
     if not qv_app.is_file():
         print(f"[START_STACK] 找不到 QuickVote：{qv_app}", file=sys.stderr)
-        print("请将 QuickVote 放到 vendor/QuickVote，或设置 QUICKVOTE_ROOT。", file=sys.stderr)
+        print("请将 QuickVote 放到 QuickVote/，或设置 QUICKVOTE_ROOT。", file=sys.stderr)
         sys.exit(1)
     if not td_main.is_file():
         print(f"[START_STACK] 找不到 TeacherDataSystem：{td_main}", file=sys.stderr)
-        print("请将 TeacherDataSystem 放到 vendor/TeacherDataSystem，或设置 TEACHERDATA_ROOT。", file=sys.stderr)
+        print("请将 TeacherDataSystem 放到 TeacherDataSystem/，或设置 TEACHERDATA_ROOT。", file=sys.stderr)
         sys.exit(1)
 
     os.environ.setdefault("QUICKVOTE_PUBLIC_URL", f"http://127.0.0.1:{qv_port}/")

@@ -9,7 +9,9 @@
 | `server.py` | 唯一入口：开发服务器；可选一键拉起子系统（见下） |
 | `public/` | 主站前端静态资源（`index.html`、`teacher.html` 等） |
 | `keadmin_queue.db` | 审批队列（SQLite，本地文件） |
-| `vendor/` | 原版 [QuickVote](vendor/README.md#原版子系统quickvote--teacherdatasystem) 与 [TeacherDataSystem](vendor/README.md#原版子系统quickvote--teacherdatasystem) 源码 |
+| `QuickVote/` | 原版 QuickVote 源码（投票系统） |
+| `TeacherDataSystem/` | 原版 TeacherDataSystem 源码 |
+| `vendor/` | 备份/脚本/补充文档（见 `vendor/README.md`） |
 | `docs/` | 钉钉与安全等补充说明 |
 
 ## 环境
@@ -34,7 +36,7 @@ python server.py
 
 ### 主站 + QuickVote + TeacherDataSystem
 
-子系统需在 `vendor/` 下或经 `QUICKVOTE_ROOT` / `TEACHERDATA_ROOT` 指到有效目录。依赖需单独安装，见 [vendor/README.md](vendor/README.md)。
+子系统默认在仓库根目录 `QuickVote/`、`TeacherDataSystem/`；也可用 `QUICKVOTE_ROOT` / `TEACHERDATA_ROOT` 指向其它路径。依赖需单独安装，见 [vendor/README.md](vendor/README.md)。
 
 ```bash
 # Linux / macOS

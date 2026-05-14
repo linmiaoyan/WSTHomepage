@@ -690,6 +690,170 @@ def _row_to_req(row):
     }
 
 
+def _req_type_label(t: str) -> str:
+    mp = {
+        "add_vehicle": "添加车牌",
+        "leave_cycle": "周期请假",
+        "reset_net_password": "重置网络密码",
+        "seal": "校章申请",
+    }
+    return mp.get(str(t or ""), str(t or "") or "-")
+
+
+def _req_status_label(status: str) -> str:
+    mp = {"pending": "待审核", "approved": "已通过 / 已办结", "rejected": "已驳回 / 已办结"}
+    return mp.get(str(status or ""), str(status or "") or "-")
+
+
+def _html_escape(s) -> str:
+    return (
+        str(s if s is not None else "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _requester_display_name(requester) -> str:
+    if not isinstance(requester, dict):
+        return "-"
+    return (
+        str(
+            requester.get("summary")
+            or requester.get("display_name")
+            or requester.get("name")
+            or requester.get("nick")
+            or requester.get("userId")
+            or "-"
+        ).strip()
+        or "-"
+    )
+
+
+def _request_summary_lines(req: dict) -> list[tuple[str, str]]:
+    p = req.get("params") if isinstance(req, dict) else {}
+    if not isinstance(p, dict):
+        p = {}
+    t = str(req.get("type") or "")
+    if t == "add_vehicle":
+        plate_type = "临时" if str(p.get("plate_type")) == "1" else "长期"
+        rows = [
+            ("姓名", p.get("name") or "-"),
+            ("车牌号", p.get("plate_no") or "-"),
+            ("车牌类型", plate_type),
+        ]
+        if str(p.get("plate_type")) == "1":
+            rows.append(("授权期限", f"{p.get('start_date') or '?'} 至 {p.get('end_date') or '?'}"))
+        if p.get("remark"):
+            rows.append(("备注", p.get("remark")))
+        return rows
+    if t == "leave_cycle":
+        stu = p.get("students")
+        if isinstance(stu, list):
+            stu = "、".join(str(x) for x in stu if x)
+        rows = [
+            ("学生", stu or "-"),
+            ("星期", p.get("week") or p.get("weekday") or "-"),
+            ("请假日期", f"{p.get('time_start') or '?'} 至 {p.get('time_end') or '?'}"),
+            ("请假时段", f"{p.get('timestart') or '?'} - {p.get('timeend') or '?'}"),
+        ]
+        if p.get("reason"):
+            rows.append(("原因", p.get("reason")))
+        return rows
+    if t == "reset_net_password":
+        return [
+            ("用户标识", p.get("userId") or p.get("user_id") or p.get("userName") or p.get("user_name") or "-"),
+            ("新密码", "已提交，回执中不显示明文"),
+        ]
+    if t == "seal":
+        rows = [
+            ("原始 PDF", p.get("pdf_url") or "-"),
+            ("盖章点数量", len(p.get("positions") or []) if isinstance(p.get("positions"), list) else 0),
+        ]
+        if p.get("remark"):
+            rows.append(("备注", p.get("remark")))
+        ex = req.get("execute_result")
+        if isinstance(ex, dict) and (ex.get("stamped_pdf_url") or ex.get("stampedPdfUrl")):
+            rows.append(("盖章结果 PDF", ex.get("stamped_pdf_url") or ex.get("stampedPdfUrl")))
+        return rows
+    return [("申请内容", json.dumps(p, ensure_ascii=False))]
+
+
+def _request_receipt_html(req: dict) -> str:
+    title = "办结回执" if str(req.get("status") or "") != "pending" else "受理回执"
+    rows = [
+        ("回执类型", title),
+        ("申请编号", f"#{req.get('id')}"),
+        ("申请类型", _req_type_label(req.get("type"))),
+        ("当前状态", _req_status_label(req.get("status"))),
+        ("发起人", _requester_display_name(req.get("requester"))),
+        ("提交时间", req.get("created_at") or "-"),
+        ("审核时间", req.get("reviewed_at") or "-"),
+        ("执行时间", req.get("executed_at") or "-"),
+    ]
+    if req.get("review_comment"):
+        rows.append(("审核意见", req.get("review_comment")))
+    detail_rows = _request_summary_lines(req)
+    ex = req.get("execute_result")
+    exec_rows = []
+    if isinstance(ex, dict):
+        if ex.get("message"):
+            exec_rows.append(("执行说明", ex.get("message")))
+        if "ok" in ex:
+            exec_rows.append(("执行结果", "成功" if ex.get("ok") else "未成功"))
+        if ex.get("http_status") is not None:
+            exec_rows.append(("接口状态", ex.get("http_status")))
+    elif ex:
+        exec_rows.append(("执行说明", str(ex)))
+
+    def table(items):
+        body = "".join(
+            "<tr><th>{}</th><td>{}</td></tr>".format(_html_escape(k), _html_escape(v))
+            for k, v in items
+        )
+        return f"<table>{body}</table>"
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>{_html_escape(title)} - #{_html_escape(req.get('id'))}</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; margin: 32px; }}
+    h1 {{ font-size: 22px; margin-bottom: 6px; }}
+    .muted {{ color: #6b7280; font-size: 13px; margin-bottom: 18px; }}
+    h2 {{ font-size: 16px; margin-top: 22px; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
+    th, td {{ border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }}
+    th {{ width: 140px; background: #f3f4f6; }}
+    .footer {{ margin-top: 24px; color: #6b7280; font-size: 12px; }}
+  </style>
+</head>
+<body>
+  <h1>{_html_escape(title)}</h1>
+  <div class="muted">本回执由审批系统自动生成，用于申请受理和办结结果留存。</div>
+  <h2>基本信息</h2>
+  {table(rows)}
+  <h2>申请内容</h2>
+  {table(detail_rows)}
+  <h2>办理结果</h2>
+  {table(exec_rows or [("办理说明", "暂无执行明细")])}
+  <div class="footer">导出时间：{_html_escape(_now_iso())}</div>
+</body>
+</html>"""
+
+
+def _current_user_can_read_request(req: dict) -> bool:
+    if _admin_api_authorized() and _admin_can_review_type(str(req.get("type") or "")):
+        return True
+    me = web_session.get("dt_user")
+    if isinstance(me, dict) and _same_dingtalk_identity(me, req.get("requester") or {}):
+        return True
+    return False
+
+
 def _parse_leave_week_slots(week_str) -> list:
     """从 week 参数解析出 1-7 的列表，支持 3、'3'、'1,2,3,4,5'。"""
     if week_str is None:
@@ -1859,7 +2023,7 @@ def api_create_request():
             (t, json.dumps(params, ensure_ascii=False), json.dumps(requester_snap, ensure_ascii=False), "pending", _now_iso())
         )
         rid = cur.lastrowid
-        if t == "leave_cycle" and rid:
+        if t == "leave_cycle" and rid and _env_flag("QUEUE_AUTO_APPROVE_LEAVE", "0"):
             _auto_approve_leave_cycle_in_db(conn, int(rid))
         conn.commit()
     finally:
@@ -1972,6 +2136,27 @@ def api_my_requests():
             out.append(_row_to_req(row))
 
     return jsonify({'ok': True, 'data': out})
+
+
+@app.route('/api/requests/<int:rid>/receipt', methods=['GET'])
+def api_request_receipt(rid: int):
+    """下载当前用户可查看的申请回执；教师本人和有权限管理员均可访问。"""
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return jsonify({'ok': False, 'msg': 'not found'}), 404
+    req_obj = _row_to_req(row)
+    if not _current_user_can_read_request(req_obj):
+        if not web_session.get("dt_user") and not web_session.get("ke_admin_gate_ok"):
+            return jsonify({'ok': False, 'need_login': True, 'msg': 'need_login'}), 401
+        return jsonify({'ok': False, 'msg': '无权限导出该申请回执'}), 403
+    html = _request_receipt_html(req_obj)
+    resp = Response(html, content_type="text/html; charset=utf-8")
+    resp.headers["Content-Disposition"] = f'attachment; filename="request_{int(rid)}_receipt.html"'
+    return resp
 
 
 @app.route('/api/admin/requests/<int:rid>', methods=['GET'])

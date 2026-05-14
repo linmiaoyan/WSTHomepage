@@ -62,6 +62,39 @@
     }
     .q-card { border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; }
     .q-title { font-weight: 600; }
+    .hero-card {
+      background: linear-gradient(135deg, #eef5ff 0%, #ffffff 62%);
+      border: 1px solid #d7e6ff;
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+    .flow-step .num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--primary-blue);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .request-card { border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: #fff; }
+    .request-card.done { border-color: #b7ebc6; background: #fbfffc; }
+    .request-card.rejected { border-color: #f3c2c8; background: #fffafa; }
+    .status-track { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .status-pill { border-radius: 999px; border: 1px solid var(--border-color); padding: 3px 8px; font-size: 12px; color: var(--text-secondary); background: #fff; }
+    .status-pill.on { border-color: var(--primary-blue); color: var(--primary-blue); background: #eff6ff; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -73,11 +106,29 @@
   </div>
 
   <div class="teacher-panel-wrap">
+    <div class="hero-card">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+        <div>
+          <div class="h4 mb-1"><i class="bi bi-send-check"></i> 教师审批服务台</div>
+          <div class="muted">按“提交申请 → 管理员审核/执行 → 查看办结 → 下载回执”的顺序完成，不需要记住后台菜单。</div>
+        </div>
+        <div class="text-end">
+          <div class="muted" id="meHint">未登录</div>
+          <a class="btn btn-outline-secondary btn-sm mt-1" id="logoutBtn" href="/auth/logout" style="display:none;"><i class="bi bi-box-arrow-right"></i> 退出</a>
+        </div>
+      </div>
+      <div class="row g-2 mt-3">
+        <div class="col-md-4"><div class="flow-step"><span class="num">1</span><span><b>说清需求</b><br/>一句话或校章 PDF 均可提交。</span></div></div>
+        <div class="col-md-4"><div class="flow-step"><span class="num">2</span><span><b>等待办理</b><br/>所有申请先进入待审核，管理员通过后自动执行。</span></div></div>
+        <div class="col-md-4"><div class="flow-step"><span class="num">3</span><span><b>拿到结果</b><br/>下方可查看办结情况，办结后下载回执/结果文件。</span></div></div>
+      </div>
+    </div>
+
     <div class="teacher-panel active" id="panelQuick" role="tabpanel" aria-labelledby="tabQuick">
       <div class="cardx mb-0">
-        <div class="mb-2"><b>自然语言申请（解析入队）</b></div>
+        <div class="mb-2"><b>快速申请</b></div>
         <div class="muted small mb-2">
-          用一句话描述需求，解析确认后提交到审批队列。支持：添加车牌、周期请假、重置网络密码。请尽量写全四要素，解析更准确：
+          用一句话描述需求，系统会解析成可确认的表单。支持：添加车牌、周期请假、重置网络密码。请尽量写全四要素，解析更准确：
           <strong>谁</strong>（姓名/对象）、<strong>做什么</strong>（车牌/请假/重置密码等）、<strong>理由或事由</strong>、
           <strong>具体时间或期限</strong>（起止日期、每周哪几天与课节；车牌请写明<strong>临时</strong>或<strong>长期</strong>及授权时长）。
         </div>
@@ -121,9 +172,9 @@
   <div class="cardx mt-3" id="myRequestsCard">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
       <div>
-        <b>入队结果（显示在本页面下方）</b>
+        <b>我的申请与办结结果</b>
         <div class="muted small mt-1">
-          说明：本系统对“智校云联”侧内容做二次处理。若需撤销或修改申请，请到 <b>智校云联</b> 后台自行撤销/修改；本页面不提供撤销/修改入口。
+          待审核时无需重复提交；已通过或已驳回即视为办结，可下载回执。校章申请通过后还会出现盖章 PDF 下载。
         </div>
       </div>
       <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshMyReqBtn">
@@ -656,7 +707,7 @@
         }
         if (!r.ok || !d.ok) { setStatus("入队失败：" + (d.msg || r.status), "err"); return; }
         modal.hide();
-        setStatus("已入队，ID=" + d.id + "（等待管理员审核）", "ok");
+        setStatus("已提交申请，编号 #" + d.id + "。请在下方查看审核和办结情况。", "ok");
         // 入队后立刻刷新展示区域
         loadMyRequests();
       } catch (e) {
@@ -698,6 +749,16 @@
       return (ex.ok ? "执行结果：成功 · " : "执行结果：未成功 · ") + escHtml(m || "");
     }
 
+    function requestReceiptUrl(item) {
+      return "/api/requests/" + encodeURIComponent(item.id) + "/receipt";
+    }
+
+    function sealResultUrl(item) {
+      var ex = item && item.execute_result;
+      if (!ex || typeof ex !== "object") return "";
+      return ex.stamped_pdf_url || ex.stampedPdfUrl || "";
+    }
+
     function renderMyRequests(list) {
       const wrap = document.getElementById("myRequestsList");
       if (!wrap) return;
@@ -710,6 +771,7 @@
         const t = typeLabel(item.type);
         const st = statusBadge(item.status);
         const params = item.params || {};
+        const status = String(item.status || "");
         let summary = "";
         if (item.type === "add_vehicle") {
           summary = (params.name ? (params.name + "，") : "") + (params.plate_no || "");
@@ -728,8 +790,24 @@
         var execHtml = executionLine(item);
         var reviewLine = "";
         if (item.review_comment) reviewLine = "<div class='muted small mt-1'>审核意见：" + escHtml(item.review_comment) + "</div>";
+        var resultUrl = sealResultUrl(item);
+        var done = status === "approved" || status === "rejected";
+        var cls = status === "approved" ? " done" : (status === "rejected" ? " rejected" : "");
+        var actions = "";
+        if (done) {
+          actions += '<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="' + escHtml(requestReceiptUrl(item)) + '"><i class="bi bi-download"></i> 下载办结回执</a>';
+        }
+        if (resultUrl) {
+          actions += ' <a class="btn btn-sm btn-success" target="_blank" rel="noopener" href="' + escHtml(resultUrl) + '"><i class="bi bi-file-earmark-pdf"></i> 下载盖章PDF</a>';
+        }
+        var track = ""
+          + "<div class='status-track'>"
+          + "<span class='status-pill on'>已提交</span>"
+          + "<span class='status-pill" + (status !== "pending" ? " on" : "") + "'>已审核</span>"
+          + "<span class='status-pill" + (done ? " on" : "") + "'>可导出</span>"
+          + "</div>";
         return (
-          "<div class='border rounded p-2 mb-2 bg-white'>" +
+          "<div class='request-card" + cls + "'>" +
           "  <div class='d-flex justify-content-between align-items-start flex-wrap gap-2'>" +
           "    <div>" +
           "      <b>#"+ item.id + "</b> <span class='text-primary'>"+ escHtml(t) +"</span>" +
@@ -739,9 +817,12 @@
           "      <div class='muted small mt-1'>提交时间 "+ escHtml(item.created_at || "") +"</div>" +
           "    </div>" +
           "  </div>" +
+          track +
           (execHtml ? "<div class='small mt-2'>" + execHtml + "</div>" : "") +
           (item.executed_at ? "<div class='muted small mt-1'>执行时间 " + escHtml(item.executed_at) + "</div>" : "") +
           reviewLine +
+          (done && !actions ? "<div class='muted small mt-2'>已办结，暂无可下载文件。</div>" : "") +
+          (actions ? "<div class='mt-2 d-flex gap-2 flex-wrap'>" + actions + "</div>" : "") +
           " </div>"
         );
       }).join("");
@@ -757,6 +838,7 @@
         const d = await r.json().catch(()=>({}));
         if (r.status === 401 && d && d.need_login) {
           // 需要登录时不强制跳转，只触发一次免登
+          if (wrap) wrap.textContent = "请先完成钉钉登录后查看我的申请。";
           setStatus("需要钉钉登录后才能查看入队结果。", "err");
           if (window.keDingTalkH5Login) window.keDingTalkH5Login();
           return;

@@ -98,7 +98,7 @@
               <th style="width:120px;">状态</th>
               <th style="width:220px;">提交时间</th>
               <th>备注</th>
-              <th style="width:120px;">结果</th>
+              <th style="width:190px;">结果 / 回执</th>
             </tr>
           </thead>
           <tbody id="mySealTbody">
@@ -178,12 +178,15 @@
           var ex = (it && it.execute_result) || null;
           var stamped = (ex && typeof ex === "object" && (ex.stamped_pdf_url || ex.stampedPdfUrl)) ? (ex.stamped_pdf_url || ex.stampedPdfUrl) : "";
           var remark = (p.remark || "").trim();
+          var done = it.status === "approved" || it.status === "rejected";
+          var actions = stamped ? ('<a class="btn btn-sm btn-outline-primary me-1" target="_blank" rel="noopener" href="' + esc(stamped) + '">下载PDF</a>') : '';
+          if (done) actions += '<a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener" href="/api/requests/' + esc(String(it.id || "")) + '/receipt">回执</a>';
           return '<tr>'
             + '<td>' + esc(String(it.id || "-")) + '</td>'
             + '<td>' + statusZh(it.status) + '</td>'
             + '<td>' + esc(fmt(it.created_at)) + '</td>'
             + '<td style="max-width:320px;white-space:pre-wrap;">' + esc(remark || "-") + '</td>'
-            + '<td>' + (stamped ? ('<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="' + esc(stamped) + '">下载</a>') : '<span class="muted">-</span>') + '</td>'
+            + '<td>' + (actions || '<span class="muted">-</span>') + '</td>'
             + '</tr>';
         }).join("");
         hint.textContent = "共 " + rows.length + " 条";

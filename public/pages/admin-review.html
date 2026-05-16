@@ -83,6 +83,11 @@
                     <div id="detailRequester" class="small mb-3 p-2 border rounded bg-light" style="display:none;"></div>
                     <div class="fw-semibold mb-1"><i class="bi bi-file-text"></i> 申请内容摘要</div>
                     <div id="detailSummary" class="small mb-3 p-2 border rounded"></div>
+                    <div id="detailReceiptWrap" class="alert alert-light border py-2 small mb-3" style="display:none;">
+                        <div class="fw-semibold mb-1"><i class="bi bi-download"></i> 回执导出</div>
+                        <div class="muted mb-2">申请提交后即可导出受理回执；通过或驳回后导出的是办结回执。</div>
+                        <a href="#" class="btn btn-sm btn-outline-primary" id="detailReceiptLink" target="_blank" rel="noopener">下载回执</a>
+                    </div>
                     <div id="addVehiclePrefillWrap" class="alert alert-light border py-2 small mb-3" style="display:none;">
                         <div class="fw-semibold mb-1"><i class="bi bi-car-front"></i> 去「添加职工车牌」补全职工</div>
                         <div class="muted mb-2">长期车牌需选择云平台职工 ID。点击下方按钮将<strong>自动带上本单车牌、姓名、备注</strong>并打开添加车牌页（长期时会用姓名自动「全局搜索」便于选人）。</div>
@@ -124,6 +129,7 @@
 const API_LIST = "/api/admin/requests";
 const API_GET = (id) => "/api/admin/requests/" + id;
 const API_REVIEW = (id) => "/api/admin/requests/" + id + "/review";
+const API_RECEIPT = (id) => "/api/requests/" + id + "/receipt";
 const API_RESOLVE_USERS = "/api/admin/dingtalk-users/resolve";
 const USER_RESOLVE_CACHE = {};
 
@@ -440,7 +446,11 @@ async function loadList() {
             return;
         }
         await resolveRequesterUsers(list);
-        tbody.innerHTML = list.map(it => `
+        tbody.innerHTML = list.map(it => {
+            const receiptBtn = it.status && it.status !== "pending"
+                ? `<a class="btn btn-outline-success btn-sm ms-1" target="_blank" rel="noopener" href="${API_RECEIPT(it.id)}">导出</a>`
+                : "";
+            return `
             <tr>
                 <td>${it.id}</td>
                 <td>${esc(typeLabelZh(it.type))}</td>
@@ -449,9 +459,11 @@ async function loadList() {
                 <td>${fmt(it.created_at)}</td>
                 <td>
                     <button class="btn btn-outline-primary btn-sm" onclick="openDetail(${it.id})">查看</button>
+                    ${receiptBtn}
                 </td>
             </tr>
-        `).join("");
+        `;
+        }).join("");
         document.getElementById("hint").textContent = "共 " + list.length + " 条";
     } catch (e) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">加载失败：' + e.message + '</td></tr>';
@@ -471,6 +483,8 @@ async function openDetail(id) {
     renderRequesterDetail(null);
     const exWrap = document.getElementById("detailExecutionWrap");
     if (exWrap) exWrap.style.display = "none";
+    const receiptWrap = document.getElementById("detailReceiptWrap");
+    if (receiptWrap) receiptWrap.style.display = "none";
     try {
         const r = await fetch(API_GET(id), { credentials: "same-origin" });
         const d = await r.json().catch(() => ({}));
@@ -486,6 +500,12 @@ async function openDetail(id) {
             `编号 ${currentDetail.id} · ${typeLabelZh(currentDetail.type)} · ${statusZh(currentDetail.status)} · 创建 ${fmt(currentDetail.created_at)}`;
         renderRequesterDetail(rq);
         if (sumEl) sumEl.textContent = renderApplicationSummary(currentDetail);
+        const receiptLink = document.getElementById("detailReceiptLink");
+        if (receiptWrap && receiptLink) {
+            receiptWrap.style.display = "";
+            receiptLink.href = API_RECEIPT(currentDetail.id);
+            receiptLink.textContent = currentDetail.status === "pending" ? "下载受理回执" : "下载办结回执";
+        }
         updateAddVehiclePrefillUI();
         renderExecutionBlock(currentDetail);
         updateSealResultUI(currentDetail);

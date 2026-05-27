@@ -265,10 +265,35 @@ def _proxy_response_from_upstream(r: requests.Response, upstream_base_url: str, 
             loc = (v or "").strip()
             if loc.startswith(upstream_base_url):
                 loc = local_prefix + loc[len(upstream_base_url) :]
+            elif (
+                loc.startswith("/")
+                and not loc.startswith("//")
+                and loc != local_prefix.rstrip("/")
+                and not loc.startswith(local_prefix.rstrip("/") + "/")
+            ):
+                loc = local_prefix.rstrip("/") + loc
             headers[k] = loc
         else:
             headers[k] = v
     return Response(r.content, status=r.status_code, headers=headers)
+
+
+def _rewrite_root_relative_html_urls(html: str, local_prefix: str) -> str:
+    """Rewrite root-relative links from an upstream app into its mounted prefix."""
+    prefix = (local_prefix or "").rstrip("/")
+    if not prefix or not html:
+        return html
+    prefix_key = prefix.lstrip("/")
+
+    def repl(m):
+        attr = m.group(1)
+        quote = m.group(2)
+        path = m.group(3) or ""
+        if path == prefix_key or path.startswith(prefix_key + "/"):
+            return m.group(0)
+        return f'{attr}={quote}{prefix}/{path}'
+
+    return re.sub(r'\b(href|src|action)=(["\'])/(?!/)([^"\']*)', repl, html)
 
 
 # ---- Single-port reverse proxy routes ----
@@ -281,11 +306,15 @@ def proxy_quickvote(path: str):
     url = upstream + "/" + (path or "")
     if request.query_string:
         url = url + ("?" + request.query_string.decode("utf-8", errors="ignore"))
+    headers = _proxy_headers_for_upstream(upstream)
+    headers["X-Forwarded-Prefix"] = "/quickvote"
+    headers["X-Forwarded-Host"] = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip()
+    headers["X-Forwarded-Proto"] = (request.headers.get("X-Forwarded-Proto") or request.scheme or "http").split(",")[0].strip()
     try:
         r = requests.request(
             method=request.method,
             url=url,
-            headers=_proxy_headers_for_upstream(upstream),
+            headers=headers,
             data=request.get_data(),
             cookies=request.cookies,
             allow_redirects=False,
@@ -299,10 +328,7 @@ def proxy_quickvote(path: str):
         if resp.mimetype and "text/html" in resp.mimetype.lower():
             txt = resp.get_data(as_text=True)
             if txt:
-                txt = txt.replace('href="/static/', 'href="/quickvote/static/')
-                txt = txt.replace("href='/static/", "href='/quickvote/static/")
-                txt = txt.replace('src="/static/', 'src="/quickvote/static/')
-                txt = txt.replace("src='/static/", "src='/quickvote/static/")
+                txt = _rewrite_root_relative_html_urls(txt, "/quickvote")
                 resp.set_data(txt)
                 resp.headers["Content-Length"] = str(len(resp.get_data()))
     except Exception:
@@ -1552,6 +1578,8 @@ def go_quickvote():
         return redirect("/index.html", code=302)
     if not _admin_has_perm("admin_external"):
         return redirect("/index.html", code=302)
+    if _env_flag("SINGLE_PORT", "1"):
+        return redirect("/quickvote/", code=302)
     u = (_env_get("QUICKVOTE_PUBLIC_URL", "").strip() or "").strip()
     if not u:
         u = _infer_sibling_service_url_from_request(default_port=int(_env_get("QUICKVOTE_PORT", "8001") or "8001"))

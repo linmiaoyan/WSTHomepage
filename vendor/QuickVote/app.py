@@ -21,6 +21,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 import logging
 import socket
 from dotenv import load_dotenv
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 加载 .env 文件
 load_dotenv()
@@ -44,14 +45,14 @@ PORT = int(os.getenv('PORT', 5005))
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 URL_PREFIX = (os.getenv("URL_PREFIX", "").strip() or "").rstrip("/")
-app = Flask(__name__)
+app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else None)
 if URL_PREFIX:
     app.config["APPLICATION_ROOT"] = URL_PREFIX
-    app.static_url_path = URL_PREFIX + "/static"
 app.config['SECRET_KEY'] = SECRET_KEY
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATABASE_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['ADMIN_GATE_KEY'] = ADMIN_GATE_KEY
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # 设置时区为北京时间
 def get_current_time():

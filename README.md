@@ -106,3 +106,17 @@ nginx 示例见 [docs/nginx-wsthomepage.conf](docs/nginx-wsthomepage.conf)。公
 - [vendor/README.md](vendor/README.md) — 子系统安装与说明
 - [docs/DINGTALK-H5.md](docs/DINGTALK-H5.md) — 钉钉 H5
 - [docs/SECURITY-NOTES.md](docs/SECURITY-NOTES.md) — 配置与安全提示
+
+## TeacherDataSystem：AI 预识别填空位置
+
+在 TeacherDataSystem 的「编辑 PDF 占位符」页面，管理员可点击 **AI预识别填空位置**。系统会把当前 PDF 页渲染成图片，调用硅基流动视觉模型识别可能需要填写的空格/表格单元格，并生成候选占位符；候选项不会自动保存，需管理员检查、删除误识别项并点击「保存占位符位置」。
+
+相关环境变量：
+
+```env
+CHAT_SERVER_API_TOKEN=你的硅基流动Token
+# 可选：覆盖视觉模型名，按硅基流动实际可用模型填写
+TEMPLATE_VISION_MODEL=moonshotai/Kimi-VL-A3B-Thinking
+```
+
+如果硅基流动账号中有 Kimi 2.6 视觉模型，可把 `TEMPLATE_VISION_MODEL` 改成对应的模型 ID。

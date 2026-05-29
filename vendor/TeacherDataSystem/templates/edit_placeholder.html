@@ -183,6 +183,9 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>PDF预览</span>
                         <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-sm btn-outline-primary" id="ai-detect-btn" onclick="aiDetectPlaceholders()">
+                                <i class="bi bi-magic"></i> AI预识别填空位置
+                            </button>
                             <button class="btn btn-sm btn-primary" id="render-preview-btn" onclick="renderFinalPreview()">
                                 <i class="bi bi-eye"></i> 渲染最终效果
                             </button>
@@ -941,6 +944,76 @@
         
         // 添加占位符
         
+        function isSamePlaceholder(a, b) {
+            if (!a || !b) return false;
+            const samePage = parseInt(a.page || 0) === parseInt(b.page || 0);
+            const sameField = String(a.field_name || '') === String(b.field_name || '');
+            const closeX = Math.abs(parseFloat(a.x || 0) - parseFloat(b.x || 0)) < 8;
+            const closeY = Math.abs(parseFloat(a.y || 0) - parseFloat(b.y || 0)) < 8;
+            return samePage && sameField && closeX && closeY;
+        }
+
+        async function aiDetectPlaceholders() {
+            const btn = document.getElementById('ai-detect-btn');
+            if (!templateId && templateId !== 0) return;
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> AI识别中';
+            }
+            try {
+                const resp = await fetch(`${API_BASE}/vl/detect-placeholders`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        template_id: templateId,
+                        page: currentPage
+                    })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    throw new Error(data.detail || data.msg || `HTTP ${resp.status}`);
+                }
+                const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+                if (!candidates.length) {
+                    alert('AI没有识别到可用的填空位置。可以继续手动点击 PDF 添加。');
+                    return;
+                }
+                let added = 0;
+                candidates.forEach(c => {
+                    if (!c || c.x == null || c.y == null || !c.field_name) return;
+                    const pos = {
+                        field_name: String(c.field_name),
+                        page: parseInt(c.page != null ? c.page : currentPage),
+                        x: parseFloat(c.x),
+                        y: parseFloat(c.y),
+                        font_size: c.font_size || globalFontSize,
+                        is_constant: false,
+                        constant_value: null,
+                        is_extra: !!c.is_extra,
+                        is_signature: false,
+                        is_ai_suggested: true,
+                        ai_label: c.label || '',
+                        ai_confidence: c.confidence,
+                        ai_reason: c.reason || ''
+                    };
+                    if (placeholderPositions.some(existing => isSamePlaceholder(existing, pos))) return;
+                    placeholderPositions.push(pos);
+                    added += 1;
+                });
+                renderPositions();
+                renderMarkers();
+                alert(`AI已预识别 ${candidates.length} 个候选位置，新增 ${added} 个。请逐个检查、删除误识别项，并保存占位符位置。`);
+            } catch (e) {
+                console.error('AI预识别失败', e);
+                alert('AI预识别失败：' + (e.message || e));
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-magic"></i> AI预识别填空位置';
+                }
+            }
+        }
+
         // 关闭字段选择器
         function closeFieldSelector() {
             const modal = document.querySelector('.modal.show');
@@ -1317,10 +1390,12 @@
                 positionsByPage[page].forEach(pos => {
                     const field = availableFields.find(f => f.name === pos.field_name);
                     const isConstant = pos.is_constant || false;
-                    const displayName = isConstant ? `常量: ${pos.constant_value || pos.field_name}` : (field ? field.label : pos.field_name);
+                    const isExtra = pos.is_extra || false;
+                    const displayName = isConstant ? `常量: ${pos.constant_value || pos.field_name}` : (isExtra ? `额外: ${pos.field_name}` : (field ? field.label : pos.field_name));
                     const posX = (pos.x != null) ? pos.x.toFixed(1) : '0.0';
                     const posY = (pos.y != null) ? pos.y.toFixed(1) : '0.0';
                     const fontSize = (pos.font_size != null) ? pos.font_size : globalFontSize;
+                    const aiTag = pos.is_ai_suggested ? '<small class="text-success d-block">AI预识别，请确认</small>' : '';
                     html += `
                         <div class="position-item">
                             <div class="d-flex justify-content-between align-items-center">
@@ -1329,6 +1404,7 @@
                                     <small class="text-muted d-block">位置: (${posX}, ${posY})</small>
                                     <small class="text-muted d-block">字体: <span id="font-size-display-${pos.index}">${fontSize}</span>px</small>
                                     ${isConstant ? '<small class="text-info d-block">常量值</small>' : ''}
+                                    ${aiTag}
                                 </div>
                                 <div class="ms-2">
                                     <input type="number" step="1" min="8" max="72" value="${fontSize}" 

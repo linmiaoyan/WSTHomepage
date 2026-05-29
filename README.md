@@ -14,7 +14,7 @@
 
 ## 环境
 
-- 在根目录按各功能需要配置 `.env`；密钥与本地 `.db` 勿提交（见 `.gitignore`）。
+- 在根目录按各功能需要配置 `.env`；可从 [`.env.example`](.env.example) 复制后修改。密钥与本地 `.db` 勿提交（见 `.gitignore`）。
 - 大模型等密钥变量名以 `server.py` 中 `_env_get` 为准。
 
 ### 多管理组与口令（可选）
@@ -24,13 +24,17 @@
 
 ## 启动
 
+### 开发模式
+
+未设置 `PRODUCTION=1` 时保持开发友好行为：默认监听 `0.0.0.0`，可设置 `DEBUG=1` 开启调试。
+
 ### 仅主站
 
 ```bash
 python server.py
 ```
 
-默认端口 `8000`（`PORT`）。调试：`DEBUG=1`。
+默认端口 `8000`（`PORT`）。
 
 ### 主站 + QuickVote + TeacherDataSystem
 
@@ -39,6 +43,8 @@ python server.py
 ```bash
 # Linux / macOS
 START_STACK=1 python server.py
+# 或：
+python run_stack.py
 ```
 
 ```bat
@@ -49,7 +55,33 @@ python server.py
 
 也可直接运行 [start_stack.bat](start_stack.bat)（已设置 `START_STACK=1`）。
 
-默认端口：主站 `8000`（`PORT`），QuickVote `8001`（`QUICKVOTE_PORT`），TeacherDataSystem `8002`（`TEACHERDATA_PORT`）。生产环境请用进程管理 / 反向代理，勿依赖多进程子 shell 的调试模式。
+默认端口：主站 `8000`（`PORT`），QuickVote `8001`（`QUICKVOTE_PORT`），TeacherDataSystem `8002`（`TEACHERDATA_PORT`）。
+
+## 生产部署建议
+
+公网部署建议使用 `PRODUCTION=1`：
+
+- 主站与 START_STACK 子服务默认监听 `127.0.0.1`，避免 8000/8001/8002 直接暴露公网。
+- Flask 主站与 QuickVote 使用 `waitress`，不再使用开发服务器；`DEBUG` 会被强制关闭。
+- `werkzeug` / `uvicorn` 的畸形请求日志会降噪，减少扫描器产生的 Oracle TNS、MSSQL、TLS 握手等二进制垃圾日志。
+- `SINGLE_PORT=1` 时，公网只需要 nginx 反代到 `127.0.0.1:8000`，QuickVote 和 TeacherDataSystem 通过 `/quickvote/`、`/teacher-data/` 子路径访问。
+
+最小生产 `.env` 示例：
+
+```env
+PRODUCTION=1
+START_STACK=1
+SINGLE_PORT=1
+HOST=127.0.0.1
+PORT=8000
+QUICKVOTE_HOST=127.0.0.1
+QUICKVOTE_PORT=8001
+TEACHERDATA_HOST=127.0.0.1
+TEACHERDATA_PORT=8002
+DEBUG=0
+```
+
+nginx 示例见 [docs/nginx-wsthomepage.conf](docs/nginx-wsthomepage.conf)。公网安全组 / Windows 防火墙应关闭 `8000-8002` 入站，仅开放 `80/443` 给 nginx；如需临时远程排查，请使用 SSH/RDP 隧道或仅对白名单 IP 临时开放。
 
 ## 常用入口（默认端口）
 

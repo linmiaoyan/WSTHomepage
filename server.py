@@ -836,11 +836,14 @@ def _request_summary_lines(req: dict) -> list[tuple[str, str]]:
 
 def _request_receipt_html(req: dict) -> str:
     title = "办结回执" if str(req.get("status") or "") != "pending" else "受理回执"
+    status_label = _req_status_label(req.get("status"))
+    if str(req.get("type") or "") == "leave_cycle" and str(req.get("status") or "") == "approved":
+        status_label = "已在智校云联发起申请（不代表请假审批已通过）"
     rows = [
         ("回执类型", title),
         ("申请编号", f"#{req.get('id')}"),
         ("申请类型", _req_type_label(req.get("type"))),
-        ("当前状态", _req_status_label(req.get("status"))),
+        ("当前状态", status_label),
         ("发起人", _requester_display_name(req.get("requester"))),
         ("提交时间", req.get("created_at") or "-"),
         ("审核时间", req.get("reviewed_at") or "-"),
@@ -1284,7 +1287,7 @@ def _execute_approved_queue_item(req: dict) -> dict:
 
 
 def _auto_approve_leave_cycle_in_db(conn, rid: int) -> None:
-    """周期请假入队后立即调用平台接口并标记为已通过（无需管理员人工点通过）。"""
+    """周期请假入队后立即调用平台接口；状态 approved 表示已发起申请，不代表审批通过。"""
     row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     if not row:
         return
@@ -1294,7 +1297,7 @@ def _auto_approve_leave_cycle_in_db(conn, rid: int) -> None:
     reviewed_at = _now_iso()
     conn.execute(
         "UPDATE requests SET status=?, reviewed_at=?, review_comment=?, execute_result=?, executed_at=? WHERE id=?",
-        ("approved", reviewed_at, "周期请假已自动通过并提交", exec_json, reviewed_at, rid),
+        ("approved", reviewed_at, "已在智校云联发起请假申请；这不代表请假审批已通过", exec_json, reviewed_at, rid),
     )
 
 
@@ -2174,7 +2177,7 @@ def api_create_request():
             (t, json.dumps(params, ensure_ascii=False), json.dumps(requester_snap, ensure_ascii=False), "pending", _now_iso())
         )
         rid = cur.lastrowid
-        if t == "leave_cycle" and rid and _env_flag("QUEUE_AUTO_APPROVE_LEAVE", "0"):
+        if t == "leave_cycle" and rid and _env_flag("QUEUE_AUTO_APPROVE_LEAVE", "1"):
             _auto_approve_leave_cycle_in_db(conn, int(rid))
         conn.commit()
     finally:

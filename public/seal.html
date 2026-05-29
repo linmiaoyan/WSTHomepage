@@ -60,7 +60,7 @@
             <textarea class="form-control" id="remark" rows="3" placeholder="例如：用于XX证明"></textarea>
           </div>
           <div class="mt-3 d-grid gap-2">
-            <button class="btn btn-primary" id="enqueueBtn" disabled><i class="bi bi-send"></i> 入队（提交校章申请）</button>
+            <button class="btn btn-primary" id="enqueueBtn" disabled><i class="bi bi-send"></i> 提交校章申请</button>
             <div id="status" class="muted"></div>
           </div>
         </div>
@@ -344,7 +344,7 @@
           return;
         }
         if(!r.ok || !d.ok) { setStatus('提交失败：'+(d.msg||d.detail||r.status),'err'); return; }
-        setStatus('已入队，ID='+d.id+'（等待管理员审核）','ok');
+        setStatus('已提交，ID='+d.id+'（等待管理员审核）','ok');
         loadMySealRequests();
       }catch(err){
         setStatus('请求失败：'+(err.message||err),'err');

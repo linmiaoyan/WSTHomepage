@@ -110,7 +110,6 @@
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
         <div>
           <div class="h4 mb-1"><i class="bi bi-send-check"></i> 教师审批服务台</div>
-          <div class="muted">按“提交申请 → 管理员审核/执行 → 查看办结 → 下载回执”的顺序完成，不需要记住后台菜单。</div>
         </div>
         <div class="text-end">
           <div class="muted" id="meHint">未登录</div>
@@ -174,14 +173,14 @@
       <div>
         <b>我的申请与办结结果</b>
         <div class="muted small mt-1">
-          待审核时无需重复提交；已通过或已驳回即视为办结，可下载回执。校章申请通过后还会出现盖章 PDF 下载。
+          待审核时无需重复提交；周期请假显示“已发起申请”表示已成功在智校云联发起申请，不代表请假审批已通过。其他申请已通过或已驳回即视为办结，可下载回执。
         </div>
       </div>
       <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshMyReqBtn">
         <i class="bi bi-arrow-clockwise"></i> 刷新
       </button>
     </div>
-    <div class="mt-3" id="myRequestsList">尚未入队任何申请。</div>
+    <div class="mt-3" id="myRequestsList">尚未提交任何申请。</div>
   </div>
 
   <!-- Parse Modal -->
@@ -194,7 +193,7 @@
         </div>
         <div class="modal-body">
           <div class="alert alert-info py-2 small" id="parseAlert">
-            请确认以下信息无误。可以直接在表单中修改关键字段，再点击“入队（提交申请）”。
+            请确认以下信息无误。可以直接在表单中修改关键字段，再点击“提交申请”。
             若解析不准，可回到上一步补充：<strong>谁</strong>、<strong>做什么</strong>、<strong>理由</strong>、<strong>时间/期限（临时或长期）</strong>。
           </div>
           <div id="parseHuman" class="mb-2"></div>
@@ -203,7 +202,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
-          <button type="button" class="btn btn-success" id="enqueueBtn"><i class="bi bi-send"></i> 入队（提交申请）</button>
+          <button type="button" class="btn btn-success" id="enqueueBtn"><i class="bi bi-send"></i> 提交申请</button>
         </div>
       </div>
     </div>
@@ -705,10 +704,14 @@
           if (window.keDingTalkH5Login) window.keDingTalkH5Login();
           return;
         }
-        if (!r.ok || !d.ok) { setStatus("入队失败：" + (d.msg || r.status), "err"); return; }
+        if (!r.ok || !d.ok) { setStatus("提交失败：" + (d.msg || r.status), "err"); return; }
         modal.hide();
-        setStatus("已提交申请，编号 #" + d.id + "。请在下方查看审核和办结情况。", "ok");
-        // 入队后立刻刷新展示区域
+        if (obj.type === "leave_cycle") {
+          setStatus("已提交请假申请，编号 #" + d.id + "。系统会自动在智校云联发起申请；这不代表请假审批已通过。", "ok");
+        } else {
+          setStatus("已提交申请，编号 #" + d.id + "。请在下方查看审核和办结情况。", "ok");
+        }
+        // 提交后立刻刷新展示区域
         loadMyRequests();
       } catch (e) {
         setStatus("请求失败：" + e.message, "err");
@@ -725,10 +728,11 @@
       return type || "-";
     }
 
-    function statusBadge(status) {
+    function statusBadge(status, item) {
       if (!status) return "<span class='text-muted'>-</span>";
       const st = String(status);
       if (st === "pending") return "<span class='badge text-bg-warning'>待审核</span>";
+      if (st === "approved" && item && item.type === "leave_cycle") return "<span class='badge text-bg-success'>已发起申请</span>";
       if (st === "approved") return "<span class='badge text-bg-success'>已通过</span>";
       if (st === "rejected") return "<span class='badge text-bg-danger'>已驳回</span>";
       return "<span class='badge text-bg-secondary'>" + escHtml(st) + "</span>";
@@ -746,6 +750,9 @@
       if (!ex || typeof ex !== "object") return "";
       var m = ex.message || "";
       if (ex.skipped) return "执行说明：" + escHtml(m || "已跳过线上自动执行");
+      if (item.type === "leave_cycle" && ex.ok) {
+        return "已在智校云联发起请假申请；这不代表请假审批已通过。" + (m ? " " + escHtml(m) : "");
+      }
       return (ex.ok ? "执行结果：成功 · " : "执行结果：未成功 · ") + escHtml(m || "");
     }
 
@@ -763,13 +770,13 @@
       const wrap = document.getElementById("myRequestsList");
       if (!wrap) return;
       if (!Array.isArray(list) || list.length === 0) {
-        wrap.textContent = "尚未入队任何申请。";
+        wrap.textContent = "尚未提交任何申请。";
         return;
       }
 
       const html = list.map(function (item) {
         const t = typeLabel(item.type);
-        const st = statusBadge(item.status);
+        const st = statusBadge(item.status, item);
         const params = item.params || {};
         const status = String(item.status || "");
         let summary = "";
@@ -789,7 +796,7 @@
         }
         var execHtml = executionLine(item);
         var reviewLine = "";
-        if (item.review_comment) reviewLine = "<div class='muted small mt-1'>审核意见：" + escHtml(item.review_comment) + "</div>";
+        if (item.review_comment) reviewLine = "<div class='muted small mt-1'>办理说明：" + escHtml(item.review_comment) + "</div>";
         var resultUrl = sealResultUrl(item);
         var done = status === "approved" || status === "rejected";
         var cls = status === "approved" ? " done" : (status === "rejected" ? " rejected" : "");
@@ -800,10 +807,11 @@
         if (resultUrl) {
           actions += ' <a class="btn btn-sm btn-success" target="_blank" rel="noopener" href="' + escHtml(resultUrl) + '"><i class="bi bi-file-earmark-pdf"></i> 下载盖章PDF</a>';
         }
+        var trackLabel2 = item.type === "leave_cycle" ? "已发起申请" : "已审核";
         var track = ""
           + "<div class='status-track'>"
           + "<span class='status-pill on'>已提交</span>"
-          + "<span class='status-pill" + (status !== "pending" ? " on" : "") + "'>已审核</span>"
+          + "<span class='status-pill" + (status !== "pending" ? " on" : "") + "'>" + trackLabel2 + "</span>"
           + "<span class='status-pill" + (done ? " on" : "") + "'>可导出</span>"
           + "</div>";
         return (
@@ -839,7 +847,7 @@
         if (r.status === 401 && d && d.need_login) {
           // 需要登录时不强制跳转，只触发一次免登
           if (wrap) wrap.textContent = "请先完成钉钉登录后查看我的申请。";
-          setStatus("需要钉钉登录后才能查看入队结果。", "err");
+          setStatus("需要钉钉登录后才能查看申请结果。", "err");
           if (window.keDingTalkH5Login) window.keDingTalkH5Login();
           return;
         }

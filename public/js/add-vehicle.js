@@ -11,6 +11,19 @@ const API_CONTACTS_SEARCH = "/api/contacts-search";
 const VEHICLE_PREFILL_STORAGE_KEY = "ke_vehicle_prefill_v1";
 let activePrefill = null;
 
+function toYMDLocal(d) {
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    return y + "-" + String(m).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+}
+
+function todayYMDLocal() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return toYMDLocal(today);
+}
+
 /**
  * 从审批页写入的 sessionStorage + URL 查询参数合并读取预填数据（URL 优先覆盖同名键）。
  */
@@ -124,6 +137,10 @@ function toggleTempDateVisibility() {
     if (row) row.style.display = isTemp ? "block" : "none";
     if (requiredSpan) requiredSpan.style.display = isTemp ? "none" : "inline";
     if (hintEl) hintEl.textContent = isTemp ? "临时车牌可不填职工；请填写下方授权日期" : "长期车牌必选职工；临时车牌可不填";
+    if (isTemp) {
+        const startDateEl = document.getElementById("startDate");
+        if (startDateEl && !startDateEl.value) startDateEl.value = todayYMDLocal();
+    }
 }
 
 function renderGlobalUsers(users, keyword) {
@@ -240,8 +257,9 @@ async function vehicleLlmParse() {
         }
         const startDateEl = document.getElementById("startDate");
         const endDateEl = document.getElementById("endDate");
-        if (startDateEl && startDate) startDateEl.value = startDate;
+        if (startDateEl) startDateEl.value = startDate || (plateType === "1" ? todayYMDLocal() : startDateEl.value);
         if (endDateEl && endDate) endDateEl.value = endDate;
+        const effectiveStartDate = startDateEl ? startDateEl.value : startDate;
         if (name) {
             tryAutoSelectByName(name);
         }
@@ -250,7 +268,7 @@ async function vehicleLlmParse() {
         if (name) lines.push("姓名：" + name);
         if (plate) lines.push("车牌：" + plate);
         if (plateType === "1") lines.push("临时");
-        if (startDate && endDate) lines.push(startDate + "～" + endDate);
+        if (effectiveStartDate && endDate) lines.push(effectiveStartDate + "～" + endDate);
         if (p.notes) lines.push("提示：" + p.notes);
         setVehicleLlmOut(lines.join("  ") || "已解析并填充。", false);
     } catch (e) {

@@ -272,6 +272,11 @@
       const day = d.getDate();
       return y + "-" + String(m).padStart(2, "0") + "-" + String(day).padStart(2, "0");
     }
+    function todayYMDLocal() {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return toYMDLocal(today);
+    }
     function addDaysLocal(d, n) {
       const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
       x.setDate(x.getDate() + n);
@@ -386,7 +391,10 @@
       if (!row || !pt) return;
       var isTemp = String(pt.value) === "1";
       row.style.display = isTemp ? "block" : "none";
-      if (!isTemp) {
+      if (isTemp) {
+        const sd = document.getElementById("inp_start_date");
+        if (sd && !sd.value) sd.value = todayYMDLocal();
+      } else {
         setHumanValue("inp_start_date", "");
         setHumanValue("inp_end_date", "");
       }
@@ -497,7 +505,7 @@
         setHumanValue("inp_name", params.name || "");
         setHumanValue("inp_plate_no", params.plate_no || "");
         setHumanValue("inp_plate_type", params.plate_type != null && params.plate_type !== "" ? String(params.plate_type) : "0");
-        setHumanValue("inp_start_date", params.start_date || "");
+        setHumanValue("inp_start_date", params.start_date || (String(params.plate_type) === "1" ? todayYMDLocal() : ""));
         setHumanValue("inp_end_date", params.end_date || "");
         setHumanValue("inp_remark", params.remark || "");
         var ptSel = document.getElementById("inp_plate_type");
@@ -559,7 +567,7 @@
         params.plate_no = getHumanValue("inp_plate_no") || "";
         params.plate_type = getHumanValue("inp_plate_type") || "0";
         if (String(params.plate_type) === "1") {
-          params.start_date = getHumanValue("inp_start_date") || "";
+          params.start_date = getHumanValue("inp_start_date") || todayYMDLocal();
           params.end_date = getHumanValue("inp_end_date") || "";
         } else {
           params.start_date = "";

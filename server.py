@@ -550,6 +550,18 @@ def _now_iso():
     return datetime.utcnow().isoformat() + 'Z'
 
 
+def _today_ymd() -> str:
+    return datetime.now().date().isoformat()
+
+
+def _default_add_vehicle_dates(params: dict) -> dict:
+    if not isinstance(params, dict):
+        return {}
+    if str(params.get("plate_type") or "0") == "1" and not str(params.get("start_date") or "").strip():
+        params["start_date"] = _today_ymd()
+    return params
+
+
 def _dingtalk_identity_bucket(d: dict) -> dict:
     """从钉钉用户/快照中抽取用于「我的申请」比对的标识（任一匹配即视为同一人）。"""
     if not isinstance(d, dict):
@@ -1160,6 +1172,7 @@ def _execute_approved_queue_item(req: dict) -> dict:
     rid = req.get("id")
     try:
         if t == "add_vehicle":
+            p = _default_add_vehicle_dates(p)
             data = {
                 "plate_no": (p.get("plate_no") or "").strip(),
                 "plate_type": str(p.get("plate_type") or "0"),
@@ -2168,6 +2181,8 @@ def api_create_request():
         return jsonify({'ok': False, 'msg': 'type 非法'}), 400
     if not isinstance(params, dict):
         return jsonify({'ok': False, 'msg': 'params 必须是对象'}), 400
+    if t == "add_vehicle":
+        params = _default_add_vehicle_dates(params)
 
     requester_snap = _requester_snapshot_for_queue()
     conn = _db()
@@ -4157,8 +4172,12 @@ def api_add_vehicle():
         return jsonify({'code': 400, 'msg': 'plate_no 不能为空'}), 400
     if plate_type != '1' and not team_uid:
         return jsonify({'code': 400, 'msg': '长期车牌请选择职工'}), 400
-    if plate_type == '1' and (not start_date or not end_date):
-        return jsonify({'code': 400, 'msg': '临时车牌请填写授权开始、结束日期'}), 400
+    if plate_type == '1':
+        if not start_date:
+            start_date = _today_ymd()
+            data["start_date"] = start_date
+        if not end_date:
+            return jsonify({'code': 400, 'msg': '临时车牌请填写授权结束日期'}), 400
 
     cloud_j, sc, need_login = _cloud_post_add_vehicle(data)
     if need_login is not None:

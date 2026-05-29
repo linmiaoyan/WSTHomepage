@@ -515,6 +515,15 @@ async def startup_event():
 
 
 if __name__ == "__main__":
+    import logging
+    import os
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    production = os.getenv("PRODUCTION", "0").strip().lower() in ("1", "true", "yes", "on")
+    host = os.getenv("HOST") or os.getenv("TEACHERDATA_HOST") or ("127.0.0.1" if production else "0.0.0.0")
+    port = int(os.getenv("PORT") or os.getenv("TEACHERDATA_PORT") or "8000")
+    if production:
+        logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    uvicorn.run(app, host=host, port=port, log_level="error" if production else "info")
 

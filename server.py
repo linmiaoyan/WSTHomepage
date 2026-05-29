@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 import importlib.util
+import logging
 
 from flask import Flask, request, jsonify, send_from_directory, redirect, session as web_session, Response
 import requests
@@ -145,6 +146,32 @@ platform_session = requests.Session()
 
 def _env_flag(key: str, default: str = "0") -> bool:
     return str(_env_get(key, default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _production_enabled() -> bool:
+    return _env_flag("PRODUCTION", "0")
+
+
+def _default_bind_host() -> str:
+    return "127.0.0.1" if _production_enabled() else "0.0.0.0"
+
+
+def _debug_enabled(default: str = "0") -> bool:
+    if _production_enabled():
+        return False
+    return _env_flag("DEBUG", default)
+
+
+def _configure_runtime_logging() -> None:
+    if not _production_enabled():
+        return
+    # Production runs behind nginx; suppress noisy scanner garbage from raw public ports.
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+
+_configure_runtime_logging()
 
 
 def _infer_public_origin_from_request() -> tuple[str, str]:
@@ -4271,8 +4298,15 @@ def _shutdown_stack_procs(procs: list) -> None:
 
 def _run_flask_dev_server():
     _main_port = int(_env_get("PORT", "8000") or "8000")
-    _flask_debug = str(_env_get("DEBUG", "0")).strip().lower() in ("1", "true", "yes", "on")
-    app.run(host="0.0.0.0", port=_main_port, debug=_flask_debug, threaded=True)
+    _host = _env_get("HOST", _default_bind_host()) or _default_bind_host()
+    if _production_enabled():
+        from waitress import serve
+
+        _threads = int(_env_get("WAITRESS_THREADS", "8") or "8")
+        serve(app, host=_host, port=_main_port, threads=_threads)
+        return
+    _flask_debug = _debug_enabled("0")
+    app.run(host=_host, port=_main_port, debug=_flask_debug, threaded=True)
 
 
 def _stack_env_enabled() -> bool:
@@ -4288,6 +4322,10 @@ def _run_start_stack() -> None:
     main_port = int(_env_get("PORT", "8000") or "8000")
     qv_port = int(_env_get("QUICKVOTE_PORT", "8001") or "8001")
     td_port = int(_env_get("TEACHERDATA_PORT", "8002") or "8002")
+    default_host = _default_bind_host()
+    main_host = _env_get("HOST", default_host) or default_host
+    qv_host = _env_get("QUICKVOTE_HOST", default_host) or default_host
+    td_host = _env_get("TEACHERDATA_HOST", default_host) or default_host
     qv_root = Path(_env_get("QUICKVOTE_ROOT", str(base / "vendor" / "QuickVote")))
     td_root = Path(_env_get("TEACHERDATA_ROOT", str(base / "vendor" / "TeacherDataSystem")))
 
@@ -4314,13 +4352,27 @@ def _run_start_stack() -> None:
 
     env_qv = os.environ.copy()
     env_qv["PORT"] = str(qv_port)
+    env_qv["HOST"] = qv_host
     p_qv = subprocess.Popen([exe, str(qv_app)], cwd=str(qv_root), env=env_qv, **kw)
     procs.append(("QuickVote", p_qv))
 
+    env_td = os.environ.copy()
+    env_td.setdefault("PRODUCTION", _env_get("PRODUCTION", "0") or "0")
     p_td = subprocess.Popen(
-        [exe, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(td_port)],
+        [
+            exe,
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            td_host,
+            "--port",
+            str(td_port),
+            "--log-level",
+            "error" if _production_enabled() else "info",
+        ],
         cwd=str(td_root),
-        env=os.environ.copy(),
+        env=env_td,
         **kw,
     )
     procs.append(("TeacherDataSystem", p_td))
@@ -4330,6 +4382,7 @@ def _run_start_stack() -> None:
     env_main = os.environ.copy()
     env_main["START_STACK_CHILD"] = "1"
     env_main["PORT"] = str(main_port)
+    env_main["HOST"] = main_host
     p_main = subprocess.Popen([exe, str(base / "server.py")], cwd=str(base), env=env_main, **kw)
     procs.append(("WSTHompage", p_main))
 

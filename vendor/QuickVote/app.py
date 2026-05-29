@@ -40,9 +40,12 @@ SECRET_KEY = os.getenv('SECRET_KEY', secrets.token_hex(32))
 ADMIN_GATE_KEY = os.getenv('ADMIN_GATE_KEY', 'wzkjgz')
 PORTAL_HOME_URL = os.getenv('PORTAL_HOME_URL', '').strip()  # 门户首页地址（可选）
 DATABASE_PATH = os.path.join(INSTANCE_DIR, 'votes.db')
-HOST = os.getenv('HOST', '0.0.0.0')
+PRODUCTION = os.getenv('PRODUCTION', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+HOST = os.getenv('HOST', '127.0.0.1' if PRODUCTION else '0.0.0.0')
 PORT = int(os.getenv('PORT', 5005))
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+DEBUG = False if PRODUCTION else os.getenv('DEBUG', 'False').lower() == 'true'
+if PRODUCTION:
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 URL_PREFIX = (os.getenv("URL_PREFIX", "").strip() or "").rstrip("/")
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else None)
@@ -1512,4 +1515,9 @@ if __name__ == '__main__':
     print(f"  管理员请在首页使用账号密码登录（默认 admin / kjgz@123）")
     print("="*60 + "\n")
     
-    app.run(host=HOST, port=PORT, debug=DEBUG, use_reloader=False)
+    if PRODUCTION:
+        from waitress import serve
+
+        serve(app, host=HOST, port=PORT, threads=int(os.getenv('WAITRESS_THREADS', '8')))
+    else:
+        app.run(host=HOST, port=PORT, debug=DEBUG, use_reloader=False)

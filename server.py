@@ -898,6 +898,100 @@ def _request_receipt_html(req: dict) -> str:
 </html>"""
 
 
+def _strip_llm_json_fence(content: str) -> str:
+    s = (content or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json|JSON)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s).strip()
+    return s
+
+
+def _extract_first_json_object(content: str) -> str:
+    """
+    Extract the first balanced JSON object from an LLM response.
+    Braces inside quoted strings are ignored.
+    """
+    s = _strip_llm_json_fence(content)
+    start = s.find("{")
+    if start < 0:
+        return s
+    in_str = False
+    esc = False
+    depth = 0
+    quote = ""
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == quote:
+                in_str = False
+            continue
+        if ch in ("'", '"'):
+            in_str = True
+            quote = ch
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1].strip()
+    return s[start:].strip()
+
+
+def _repair_common_llm_json(text: str) -> str:
+    s = (text or "").strip()
+    # LLMs occasionally emit full-width punctuation in otherwise JSON-like text.
+    s = s.replace("，", ",").replace("：", ":")
+    # Remove trailing commas before object/array endings.
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+    # Insert a missing comma between a completed value and the next quoted key.
+    s = re.sub(r'(?<=[}\]"\d])\s+(?="[^"\n\r]+\"\s*:)', ", ", s)
+    s = re.sub(r"(?<=[}\]'\d])\s+(?='[^'\n\r]+'\s*:)", ", ", s)
+    return s
+
+
+def _loads_llm_json_object(content: str) -> dict:
+    """
+    Parse JSON returned by an LLM. Accepts fenced/prose-wrapped JSON and repairs
+    common small formatting defects such as a missing comma between fields.
+    """
+    raw = content or ""
+    candidates = []
+    for item in (_strip_llm_json_fence(raw), _extract_first_json_object(raw)):
+        item = (item or "").strip()
+        if item and item not in candidates:
+            candidates.append(item)
+    errors = []
+    for text in candidates:
+        for candidate in (text, _repair_common_llm_json(text)):
+            if not candidate:
+                continue
+            try:
+                obj = json.loads(candidate)
+            except json.JSONDecodeError as e:
+                errors.append(str(e))
+            else:
+                if isinstance(obj, dict):
+                    return obj
+                raise ValueError("模型返回 JSON 不是对象")
+            try:
+                import ast
+
+                obj = ast.literal_eval(candidate)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                return obj
+            raise ValueError("模型返回 JSON 不是对象")
+    detail = errors[-1] if errors else "未找到 JSON 对象"
+    preview = _strip_llm_json_fence(raw).replace("\r", " ").replace("\n", " ")[:160]
+    raise ValueError(f"模型返回内容不是有效 JSON，请补充描述后重试。解析错误：{detail}；原始片段：{preview}")
+
+
 def _current_user_can_read_request(req: dict) -> bool:
     if _admin_api_authorized() and _admin_can_review_type(str(req.get("type") or "")):
         return True
@@ -2020,7 +2114,7 @@ def api_request_parse():
             max_tokens=600,
             temperature=0
         )
-        parsed = json.loads(content)
+        parsed = _loads_llm_json_object(content)
         t = str(parsed.get("type") or "").strip()
         if t not in ("add_vehicle", "leave_cycle", "reset_net_password", "seal"):
             return jsonify({'ok': False, 'msg': f'type 非法: {t}', 'raw': content}), 400
@@ -2040,8 +2134,10 @@ def api_request_parse():
             notes = " ".join(x for x in bits if x).strip()
         out = {"type": t, "params": params, "notes": notes}
         return jsonify({'ok': True, 'data': out, 'raw': content})
+    except ValueError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': '解析服务调用失败：' + str(e)}), 500
 
 
 def _requester_snapshot_for_queue():
@@ -3119,13 +3215,14 @@ def api_leave_nlp():
             max_tokens=800,
             temperature=0
         )
-        # Ensure valid JSON
-        parsed = json.loads(content)
+        parsed = _loads_llm_json_object(content)
         parsed = _leave_nlp_apply_wzkgz_timetable(parsed, text)
         parsed = _enrich_leave_nlp_for_cycle_form(text, parsed)
         return jsonify({'ok': True, 'data': parsed, 'raw': content})
+    except ValueError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': '解析服务调用失败：' + str(e)}), 500
 
 
 def _parse_duration_to_dates(duration_text: str):
@@ -3222,7 +3319,7 @@ def api_vehicle_nlp():
             max_tokens=400,
             temperature=0
         )
-        parsed = json.loads(content)
+        parsed = _loads_llm_json_object(content)
         name = str(parsed.get('name') or '').strip()
         plate = str(parsed.get('plate_no') or '').strip()
         plate = plate.replace(' ', '').upper()
@@ -3247,8 +3344,10 @@ def api_vehicle_nlp():
             parsed['start_date'] = ''
             parsed['end_date'] = ''
         return jsonify({'ok': True, 'data': parsed, 'raw': content})
+    except ValueError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
     except Exception as e:
-        return jsonify({'ok': False, 'msg': str(e)}), 500
+        return jsonify({'ok': False, 'msg': '解析服务调用失败：' + str(e)}), 500
 
 
 @app.after_request

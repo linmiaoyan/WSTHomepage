@@ -19,7 +19,7 @@
     #pdfCanvas { display: block; }
     #overlay { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: auto; cursor: crosshair; }
     .stamp { position: absolute; pointer-events: auto; user-select: none; }
-    .stamp .stamp-img { width: 72px; height: 72px; object-fit: contain; display: block; border: 1px dashed rgba(0,0,0,.15); background: #fff; }
+    .stamp .stamp-img { object-fit: contain; display: block; border: 1px dashed rgba(0,0,0,.15); background: #fff; }
     .stamp .lbl { background: rgba(37,99,235,.92); color: #fff; border-radius: 6px; padding: 2px 8px; font-size: 12px; margin-top: 4px; }
     .stamp .del { position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border: none; border-radius: 50%; background: #dc3545; color: #fff; line-height: 18px; font-size: 12px; }
     /* 嵌入教师页 iframe（?embed=1）时精简顶栏 */
@@ -123,6 +123,8 @@
     const API_ME = "/api/me";
     const API_MY_REQUESTS = "/api/my-requests";
     const API_SEAL_STAMP = "/api/seal-stamp";
+    const SEAL_STAMP_SIDE_CM = 3.9;
+    const SEAL_STAMP_SIDE_PT = SEAL_STAMP_SIDE_CM * 72 / 2.54;
     let stampImageUrl = "/images/seal-placeholder.png";
     const stampPositions = []; // {x,y} PDF points (current single-page)
     let fileObj = null;
@@ -260,8 +262,10 @@
         d.style.left=sc.x+'px';
         d.style.top=sc.y+'px';
         d.dataset.idx=String(idx);
+        const stampW = Math.max(1, SEAL_STAMP_SIDE_PT * sX);
+        const stampH = Math.max(1, SEAL_STAMP_SIDE_PT * sY);
         var su = String(stampImageUrl).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-        d.innerHTML = '<img class="stamp-img" src="' + su + '" alt="" draggable="false" />' +
+        d.innerHTML = '<img class="stamp-img" src="' + su + '" alt="" draggable="false" style="width:' + stampW + 'px;height:' + stampH + 'px;" />' +
           '<div class="lbl">校章 #' + (idx + 1) + '</div><button class="del" title="删除">×</button>';
         d.querySelector('.del').addEventListener('click',(e)=>{ e.stopPropagation(); stampPositions.splice(idx,1); setCount(); renderStamps(); });
 

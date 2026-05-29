@@ -1318,6 +1318,7 @@ UPLOADS_DIR = os.path.join(os.path.dirname(__file__), 'uploads')
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 SEAL_STAMP_NAMES = ("seal_stamp.png", "seal_stamp.jpg", "seal_stamp.jpeg", "seal_stamp.webp", "seal_stamp.gif")
+SEAL_STAMP_SIDE_CM = 3.9
 
 
 def _write_white_png(path: str, w: int, h: int) -> None:
@@ -1477,8 +1478,8 @@ def _auto_generate_seal_result_pdf(req: dict) -> dict:
         page = doc.load_page(0)
         page_h = float(page.rect.height)
 
-        # 印章统一为 4.2cm × 4.2cm（1 in = 72 pt，1 in = 2.54 cm）
-        side_pt = 4.2 * 72.0 / 2.54
+        # 印章统一为 3.9cm × 3.9cm（1 in = 72 pt，1 in = 2.54 cm）
+        side_pt = SEAL_STAMP_SIDE_CM * 72.0 / 2.54
         sw = side_pt
         sh = side_pt
 

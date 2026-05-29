@@ -83,7 +83,6 @@
     <nav class="top-navbar">
         <div class="nav-container">
             <a class="nav-link active" href="#"><i class="bi bi-file-earmark-text"></i> 我的填表任务</a>
-            <a class="nav-link" href="/query"><i class="bi bi-search"></i> 结果查询</a>
             <a class="nav-link" href="http://www.wzkjgz.site:8000/home.html"><i class="bi bi-house-door"></i> 门户首页</a>
         </div>
     </nav>
@@ -226,8 +225,8 @@
                                         <i class="bi bi-download"></i> 下载PDF
                                     </button>
                                 ` : `
-                                    <button class="btn btn-info btn-sm" onclick="viewTaskDetail(${task.id}, ${teacherId})">
-                                        <i class="bi bi-info-circle"></i> 查看详情
+                                    <button class="btn btn-outline-secondary btn-sm" disabled>
+                                        <i class="bi bi-hourglass-split"></i> 等待生成
                                     </button>
                                 `}
                             </div>
@@ -280,12 +279,6 @@
                 console.error('下载错误:', error);
                 alert('下载失败：' + error.message);
             }
-        }
-        
-        // 查看任务详情（复用query.html中的函数）
-        async function viewTaskDetail(taskId, teacherId) {
-            // 跳转到查询页面并自动查询
-            window.location.href = `/query?task_id=${taskId}&teacher_id=${teacherId}`;
         }
         
         // 退出登录

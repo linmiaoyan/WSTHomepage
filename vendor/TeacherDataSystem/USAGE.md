@@ -34,6 +34,12 @@ uvicorn app.main:app --reload
 
 API文档：`http://localhost:8000/docs`
 
+### 登录入口
+
+- 教师入口：`/teacher/dashboard`（未登录会自动跳到 `/teacher/login`）
+- 管理员入口：`/admin/login`
+- 管理员密码来自环境变量 `ADMIN_PASSWORD`，仓库不提供默认弱口令；未配置时管理员登录会被禁用。
+
 ## 使用流程
 
 ### 一、教师信息管理

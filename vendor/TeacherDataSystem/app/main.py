@@ -66,8 +66,8 @@ app.include_router(import_router)
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    """首页 - 重定向到查询页面"""
-    return RedirectResponse(url="/query")
+    """首页 - 统一进入教师个人中心；未登录时由个人中心跳转登录页。"""
+    return RedirectResponse(url="/teacher/dashboard")
 
 
 @app.get("/admin/login", response_class=HTMLResponse)
@@ -273,18 +273,8 @@ async def edit_placeholder_page(request: Request):
 
 @app.get("/query", response_class=HTMLResponse)
 async def query_page():
-    """用户查询页面"""
-    html_file = Path(__file__).parent.parent / "templates" / "query.html"
-    if html_file.exists():
-        return html_file.read_text(encoding="utf-8")
-    return """
-    <html>
-        <head><title>查询我的填表结果</title></head>
-        <body>
-            <h1>页面加载失败</h1>
-        </body>
-    </html>
-    """
+    """旧的查询入口：统一跳转到教师个人中心。"""
+    return RedirectResponse(url="/teacher/dashboard")
 
 
 @app.get("/teacher/login", response_class=HTMLResponse)

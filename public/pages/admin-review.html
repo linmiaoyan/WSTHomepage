@@ -84,9 +84,9 @@
                     <div class="fw-semibold mb-1"><i class="bi bi-file-text"></i> 申请内容摘要</div>
                     <div id="detailSummary" class="small mb-3 p-2 border rounded"></div>
                     <div id="detailReceiptWrap" class="alert alert-light border py-2 small mb-3" style="display:none;">
-                        <div class="fw-semibold mb-1"><i class="bi bi-download"></i> 回执导出</div>
-                        <div class="muted mb-2">申请提交后即可导出受理回执；通过或驳回后导出的是办结回执。</div>
-                        <a href="#" class="btn btn-sm btn-outline-primary" id="detailReceiptLink" target="_blank" rel="noopener">下载回执</a>
+                        <div class="fw-semibold mb-1"><i class="bi bi-download"></i> 校章回执导出</div>
+                        <div class="muted mb-2">仅校章 PDF 申请办结后提供回执；其他申请不生成办结回执。</div>
+                        <a href="#" class="btn btn-sm btn-outline-primary" id="detailReceiptLink" target="_blank" rel="noopener">下载校章回执</a>
                     </div>
                     <div id="addVehiclePrefillWrap" class="alert alert-light border py-2 small mb-3" style="display:none;">
                         <div class="fw-semibold mb-1"><i class="bi bi-car-front"></i> 去「添加职工车牌」补全职工</div>
@@ -447,7 +447,7 @@ async function loadList() {
         }
         await resolveRequesterUsers(list);
         tbody.innerHTML = list.map(it => {
-            const receiptBtn = it.status && it.status !== "pending"
+            const receiptBtn = it.type === "seal" && it.status && it.status !== "pending"
                 ? `<a class="btn btn-outline-success btn-sm ms-1" target="_blank" rel="noopener" href="${API_RECEIPT(it.id)}">导出</a>`
                 : "";
             return `
@@ -501,10 +501,10 @@ async function openDetail(id) {
         renderRequesterDetail(rq);
         if (sumEl) sumEl.textContent = renderApplicationSummary(currentDetail);
         const receiptLink = document.getElementById("detailReceiptLink");
-        if (receiptWrap && receiptLink) {
+        if (receiptWrap && receiptLink && currentDetail.type === "seal" && currentDetail.status !== "pending") {
             receiptWrap.style.display = "";
             receiptLink.href = API_RECEIPT(currentDetail.id);
-            receiptLink.textContent = currentDetail.status === "pending" ? "下载受理回执" : "下载办结回执";
+            receiptLink.textContent = "下载校章回执";
         }
         updateAddVehiclePrefillUI();
         renderExecutionBlock(currentDetail);

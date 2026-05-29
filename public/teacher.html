@@ -119,7 +119,7 @@
       <div class="row g-2 mt-3">
         <div class="col-md-4"><div class="flow-step"><span class="num">1</span><span><b>说清需求</b><br/>一句话或校章 PDF 均可提交。</span></div></div>
         <div class="col-md-4"><div class="flow-step"><span class="num">2</span><span><b>等待办理</b><br/>所有申请先进入待审核，管理员通过后自动执行。</span></div></div>
-        <div class="col-md-4"><div class="flow-step"><span class="num">3</span><span><b>拿到结果</b><br/>下方可查看办结情况，办结后下载回执/结果文件。</span></div></div>
+        <div class="col-md-4"><div class="flow-step"><span class="num">3</span><span><b>拿到结果</b><br/>下方可查看办结情况，校章申请可下载结果文件。</span></div></div>
       </div>
     </div>
 
@@ -172,7 +172,7 @@
       <div>
         <b>我的申请与办结结果</b>
         <div class="muted small mt-1">
-          待审核时无需重复提交；周期请假显示“已发起申请”表示已成功在智校云联发起申请，不代表请假审批已通过。其他申请已通过或已驳回即视为办结，可下载回执。
+          待审核时无需重复提交；周期请假显示“已发起申请”表示已成功在智校云联发起申请，不代表请假审批已通过。校章申请办结后可下载盖章 PDF 和回执。
         </div>
       </div>
       <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshMyReqBtn">
@@ -763,14 +763,14 @@
       return (ex.ok ? "执行结果：成功 · " : "执行结果：未成功 · ") + escHtml(m || "");
     }
 
-    function requestReceiptUrl(item) {
-      return "/api/requests/" + encodeURIComponent(item.id) + "/receipt";
-    }
-
     function sealResultUrl(item) {
       var ex = item && item.execute_result;
       if (!ex || typeof ex !== "object") return "";
       return ex.stamped_pdf_url || ex.stampedPdfUrl || "";
+    }
+
+    function sealReceiptUrl(item) {
+      return "/api/requests/" + encodeURIComponent(item.id) + "/receipt";
     }
 
     function renderMyRequests(list) {
@@ -808,11 +808,11 @@
         var done = status === "approved" || status === "rejected";
         var cls = status === "approved" ? " done" : (status === "rejected" ? " rejected" : "");
         var actions = "";
-        if (done) {
-          actions += '<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="' + escHtml(requestReceiptUrl(item)) + '"><i class="bi bi-download"></i> 下载办结回执</a>';
-        }
         if (resultUrl) {
           actions += ' <a class="btn btn-sm btn-success" target="_blank" rel="noopener" href="' + escHtml(resultUrl) + '"><i class="bi bi-file-earmark-pdf"></i> 下载盖章PDF</a>';
+        }
+        if (done && item.type === "seal") {
+          actions += ' <a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="' + escHtml(sealReceiptUrl(item)) + '"><i class="bi bi-download"></i> 下载回执</a>';
         }
         var trackLabel2 = item.type === "leave_cycle" ? "已发起申请" : "已审核";
         var track = ""
@@ -836,7 +836,6 @@
           (execHtml ? "<div class='small mt-2'>" + execHtml + "</div>" : "") +
           (item.executed_at ? "<div class='muted small mt-1'>执行时间 " + escHtml(item.executed_at) + "</div>" : "") +
           reviewLine +
-          (done && !actions ? "<div class='muted small mt-2'>已办结，暂无可下载文件。</div>" : "") +
           (actions ? "<div class='mt-2 d-flex gap-2 flex-wrap'>" + actions + "</div>" : "") +
           " </div>"
         );

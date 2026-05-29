@@ -830,7 +830,7 @@ def _request_summary_lines(req: dict) -> list[tuple[str, str]]:
     if t == "reset_net_password":
         return [
             ("用户标识", p.get("userId") or p.get("user_id") or p.get("userName") or p.get("user_name") or "-"),
-            ("新密码", "已提交，回执中不显示明文"),
+            ("新密码", "已提交，结果中不显示明文"),
         ]
     if t == "seal":
         rows = [
@@ -847,10 +847,8 @@ def _request_summary_lines(req: dict) -> list[tuple[str, str]]:
 
 
 def _request_receipt_html(req: dict) -> str:
-    title = "办结回执" if str(req.get("status") or "") != "pending" else "受理回执"
+    title = "校章办结回执"
     status_label = _req_status_label(req.get("status"))
-    if str(req.get("type") or "") == "leave_cycle" and str(req.get("status") or "") == "approved":
-        status_label = "已在智校云联发起申请（不代表请假审批已通过）"
     rows = [
         ("回执类型", title),
         ("申请编号", f"#{req.get('id')}"),
@@ -2310,7 +2308,7 @@ def api_my_requests():
 
 @app.route('/api/requests/<int:rid>/receipt', methods=['GET'])
 def api_request_receipt(rid: int):
-    """下载当前用户可查看的申请回执；教师本人和有权限管理员均可访问。"""
+    """下载校章 PDF 申请办结回执；教师本人和有权限管理员均可访问。"""
     conn = _db()
     try:
         row = conn.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
@@ -2319,6 +2317,10 @@ def api_request_receipt(rid: int):
     if not row:
         return jsonify({'ok': False, 'msg': 'not found'}), 404
     req_obj = _row_to_req(row)
+    if str(req_obj.get("type") or "") != "seal":
+        return jsonify({'ok': False, 'msg': '仅校章 PDF 申请支持导出回执'}), 400
+    if str(req_obj.get("status") or "") == "pending":
+        return jsonify({'ok': False, 'msg': '校章申请办结后才能导出回执'}), 400
     if not _current_user_can_read_request(req_obj):
         if not web_session.get("dt_user") and not web_session.get("ke_admin_gate_ok"):
             return jsonify({'ok': False, 'need_login': True, 'msg': 'need_login'}), 401

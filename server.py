@@ -988,8 +988,13 @@ def _map_leave_params_to_cycle_body(p: dict) -> dict:
 
     today = date.today().isoformat()
     end7 = (date.today() + timedelta(days=7)).isoformat()
-    # grade：平台「关联年级」ID，与 …/add/grade/{grade}/ 一致，勿臆测为 1/2/3。
-    grade = str(p.get("grade") if p.get("grade") is not None else p.get("gids") or "1").strip()
+    # grade：平台「关联年级」ID；未指定时留空，由 _leave_cycle_submit_core 按 LEAVE_GRADE_GIDS_TRY 自动试查。
+    g_raw = p.get("grade")
+    if g_raw is None:
+        g_raw = p.get("gids")
+    grade = "" if g_raw is None else str(g_raw).strip()
+    if _leave_grade_uncertain(grade):
+        grade = ""
     week_raw = p.get("week") if p.get("week") is not None else p.get("weekday")
     ws_single = str(week_raw).strip() if week_raw is not None else ""
     if ws_single and "," not in ws_single.replace("，", ",") and not ws_single.isdigit():
@@ -1979,7 +1984,6 @@ def api_request_parse():
     leave_cycle_hint = {
         "type": "leave_cycle",
         "params": {
-            "grade": "1",
             "students": ["李四", "王五"],
             "weekday": 1,
             "week": "1,2,3,4,5",
@@ -3033,6 +3037,13 @@ def _enrich_leave_cycle_params_from_original_text(original_text: str, params: di
 
     _sanitize_leave_cycle_dates(params, text)
 
+    resolved_grade = _resolve_leave_grade(params.get("grade") or params.get("gids"), text)
+    if resolved_grade:
+        params["grade"] = resolved_grade
+    else:
+        params.pop("grade", None)
+        params.pop("gids", None)
+
     return params
 
 
@@ -3058,6 +3069,11 @@ def _enrich_leave_nlp_for_cycle_form(text: str, parsed: dict) -> dict:
     _sanitize_leave_cycle_dates(shim, text)
     parsed["time_start"] = shim.get("time_start")
     parsed["time_end"] = shim.get("time_end")
+    resolved_grade = _resolve_leave_grade(parsed.get("grade"), text)
+    if resolved_grade:
+        parsed["grade"] = resolved_grade
+    else:
+        parsed.pop("grade", None)
     return parsed
 
 
@@ -3612,6 +3628,65 @@ def _leave_grade_uncertain(primary: str) -> bool:
     return g in ("", "auto", "*", "不确定", "unknown", "x")
 
 
+def _leave_grade_gids_list() -> list:
+    raw = (_env_get("LEAVE_GRADE_GIDS_TRY", "1,2,3") or "1,2,3").replace("，", ",")
+    out = [s.strip() for s in raw.split(",") if s.strip()]
+    return out or ["1"]
+
+
+def _infer_grade_gid_from_leave_text(text: str) -> str:
+    """从原文「高一/高二/高三」推断平台年级 ID（顺序见 LEAVE_GRADE_GIDS_TRY）。"""
+    if not text:
+        return ""
+    gids = _leave_grade_gids_list()
+    patterns = [
+        (r"高三年级|高三(?!生)|三年级", 2),
+        (r"高二年级|高二(?!生)|二年级", 1),
+        (r"高一年级|高一(?!生)|一年级", 0),
+    ]
+    for pat, idx in patterns:
+        if re.search(pat, text):
+            return gids[idx] if idx < len(gids) else ""
+    m = re.search(r"高\s*([123一二三])", text)
+    if m:
+        idx_map = {"1": 0, "2": 1, "3": 2, "一": 0, "二": 1, "三": 2}
+        idx = idx_map.get(m.group(1))
+        if idx is not None and idx < len(gids):
+            return gids[idx]
+    return ""
+
+
+def _leave_text_mentions_explicit_grade_id(text: str) -> bool:
+    if not text:
+        return False
+    if re.search(r"(?:grade|关联年级|年级\s*[Ii][Dd])\s*[:/]?\s*\d+", text, re.I):
+        return True
+    if re.search(r"/add/grade/\d+", text, re.I):
+        return True
+    return False
+
+
+def _resolve_leave_grade(grade_raw, text: str = "") -> str:
+    """
+    统一解析周期请假的 grade：
+    - 空/未传 → 自动按 LEAVE_GRADE_GIDS_TRY 试查
+    - 原文含高一/高二/高三 → 映射到对应 ID
+    - 模型臆造的 1/2/3 且原文未说明年级 → 视为未指定
+    """
+    inferred = _infer_grade_gid_from_leave_text(text or "")
+    if inferred:
+        return inferred
+    if grade_raw is None:
+        return ""
+    g = str(grade_raw).strip()
+    if _leave_grade_uncertain(g):
+        return ""
+    if g in ("1", "2", "3") and text and not _leave_text_mentions_explicit_grade_id(text):
+        if not re.search(r"高[一二三123]|年级", text):
+            return ""
+    return g
+
+
 def _leave_grade_gids_try_order(primary: str) -> list:
     """
     学生选择器 POST /base/selector/student 的 gids 必须与平台「关联年级」一致。
@@ -3623,8 +3698,7 @@ def _leave_grade_gids_try_order(primary: str) -> list:
     if _leave_grade_uncertain(primary):
         seen = set()
         order = []
-        raw = (_env_get("LEAVE_GRADE_GIDS_TRY", "1,2,3") or "1,2,3").replace("，", ",")
-        for x in [s.strip() for s in raw.split(",")]:
+        for x in _leave_grade_gids_list():
             if x and x not in seen:
                 seen.add(x)
                 order.append(x)
@@ -3728,12 +3802,11 @@ def _leave_cycle_submit_core(data: dict, requester: dict = None):
             'ok': False,
             'msg': '未配置周期请假账号：请在 .env 设置 LEAVE_BASE，并配置 LEAVE_USER/LEAVE_PASS 或 LEAVE_CRED_MAP_JSON',
         }, 503
-    # grade：未传键时默认 "1"（兼容旧客户端）；传 "" / auto 等表示不确定 → 按 LEAVE_GRADE_GIDS_TRY 遍历高一/高二/高三
+    # grade：未传或空表示不确定 → 按 LEAVE_GRADE_GIDS_TRY 遍历高一/高二/高三
     _gr = data.get("grade")
-    if _gr is None:
-        grade = "1"
-    else:
-        grade = str(_gr).strip()
+    grade = "" if _gr is None else str(_gr).strip()
+    if _leave_grade_uncertain(grade):
+        grade = ""
 
     students_raw = (data.get('students') or '').strip()
     time_start = (data.get('time_start') or '').strip()

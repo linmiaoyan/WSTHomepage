@@ -142,6 +142,10 @@ function fillFromNlp(nlp) {
     const r = document.getElementById("reason");
     if (r) r.value = nlp.reason.trim();
   }
+  if (nlp.grade != null && String(nlp.grade).trim()) {
+    const g = document.getElementById("grade");
+    if (g) g.value = String(nlp.grade).trim();
+  }
 }
 
 async function llmParse() {

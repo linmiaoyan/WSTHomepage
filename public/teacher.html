@@ -427,7 +427,9 @@
         html += "<hr class='my-2'/>";
         html += "<div class='row g-2'>";
         html += "  <div class='col-md-12'><label class='form-label small text-muted'>学生</label><input id='inp_students' class='form-control form-control-sm' placeholder='例如：张三；李四' /></div>";
+        html += "  <div class='col-md-4'><label class='form-label small text-muted'>关联年级（可空）</label><input id='inp_grade' class='form-control form-control-sm' inputmode='numeric' placeholder='留空自动查找' /></div>";
         html += "  <div class='col-md-12'><label class='form-label small text-muted'>原因</label><input id='inp_reason' class='form-control form-control-sm' placeholder='可空' /></div>";
+        html += "  <div class='col-12'><div class='small text-muted'>年级与平台地址 <code>…/add/grade/数字/…</code> 一致；留空时按高一→高二→高三依次查找学生。</div></div>";
         html += "</div>";
         html += "<div class='mt-2 border rounded p-2 bg-light'>";
         html += "  <div class='fw-semibold small mb-1'>请假日期范围（可改）</div>";
@@ -463,6 +465,7 @@
 
         const stuArr = Array.isArray(params.students) ? params.students : (params.students ? String(params.students).split(/[；,，\s]+/) : []);
         setHumanValue("inp_students", stuArr.filter(Boolean).join("；"));
+        setHumanValue("inp_grade", params.grade != null && params.grade !== "" ? String(params.grade) : "");
         setHumanValue("inp_reason", params.reason || "");
         setHumanValue("inp_timestart", params.timestart || "");
         setHumanValue("inp_timeend", params.timeend || "");
@@ -547,6 +550,7 @@
             if (n >= 1 && n <= 7) params.weekday = n;
           }
         }
+        params.grade = getHumanValue("inp_grade") || "";
         params.reason = getHumanValue("inp_reason") || lastParsed.params.reason || "";
         params.timestart = getHumanValue("inp_timestart") || lastParsed.params.timestart || "";
         params.timeend = getHumanValue("inp_timeend") || lastParsed.params.timeend || "";

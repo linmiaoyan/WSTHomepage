@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .admin-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
+    }
+
+    .admin-header {
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+
+    .admin-header h2 {
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: #1a202c;
+        margin: 0;
+    }
+
+    .trash-hint {
+        color: #718096;
+        font-size: 0.9rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .survey-list-section {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .survey-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1rem;
+    }
+
+    .survey-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        transition: all 0.2s ease;
+        height: 100%;
+    }
+
+    .survey-card:hover {
+        border-color: #cbd5e0;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .survey-title {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 0.75rem;
+        line-height: 1.4;
+    }
+
+    .survey-meta {
+        margin-bottom: 1rem;
+        font-size: 0.8125rem;
+        color: #718096;
+    }
+
+    .survey-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+</style>
+
+<div class="admin-container">
+    <div class="admin-header">
+        <h2><i class="bi bi-trash"></i> 回收站</h2>
+        <a href="{{ url_for('admin') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> 返回管理面板
+        </a>
+    </div>
+
+    <p class="trash-hint">
+        误删的问卷会保留在此，可一键恢复；永久删除后无法找回（含题目、投票结果、二维码等全部数据）。
+    </p>
+
+    <div class="survey-list-section">
+        {% if survey_stats %}
+        <div class="survey-grid">
+            {% for stat in survey_stats %}
+            {% set survey = stat.survey %}
+            <div class="card survey-card">
+                <div class="card-body">
+                    <h6 class="survey-title" title="{{ survey.name }}">{{ survey.name }}</h6>
+                    <div class="survey-meta">
+                        <span class="badge bg-secondary">{{ '单选' if survey.type == 'single_choice' else '表格' }}</span>
+                        <div class="mt-2">
+                            已收集 <strong>{{ stat.total_count }}</strong> 条数据
+                        </div>
+                        {% if survey.deleted_at %}
+                        <div class="mt-1">删除时间：{{ survey.deleted_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="survey-actions">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <a href="{{ url_for('view_results', survey_id=survey.id) }}" class="btn btn-outline-success btn-sm">查看结果</a>
+                            <a href="{{ url_for('preview_survey', survey_id=survey.id) }}" class="btn btn-outline-info btn-sm" target="_blank">预览</a>
+                        </div>
+                        <form action="{{ url_for('restore_survey', survey_id=survey.id) }}" method="post"
+                              onsubmit="return confirm('确定恢复问卷「{{ survey.name }}」吗？');">
+                            <button type="submit" class="btn btn-primary btn-sm w-100">
+                                <i class="bi bi-arrow-counterclockwise"></i> 恢复问卷
+                            </button>
+                        </form>
+                        <form action="{{ url_for('permanent_delete_survey', survey_id=survey.id) }}" method="post"
+                              onsubmit="return confirm('永久删除「{{ survey.name }}」及其全部数据？此操作不可撤销！');">
+                            <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                                <i class="bi bi-trash-fill"></i> 永久删除
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-trash" style="font-size: 2rem;"></i>
+            <p class="mb-0 mt-2">回收站为空</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

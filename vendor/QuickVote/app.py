@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from datetime import datetime, timedelta
@@ -121,7 +121,15 @@ def get_portal_home_url() -> str:
 
 @app.context_processor
 def inject_common_links():
-    return {'portal_home_url': get_portal_home_url()}
+    trash_count = 0
+    try:
+        if session.get('is_admin') or (
+            current_user.is_authenticated and getattr(current_user, 'is_admin', False)
+        ):
+            trash_count = trashed_surveys_query().count()
+    except Exception:
+        trash_count = 0
+    return {'portal_home_url': get_portal_home_url(), 'trash_count': trash_count}
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -154,8 +162,24 @@ class Survey(db.Model):
     option_limits = db.Column(db.JSON, nullable=True)  # 新增：选项限制，格式为 {"A": 7, "B": 7, ...}
     table_option_count = db.Column(db.Integer, default=3)  # 新增：表格问卷选项数量，默认3
     enable_quick_fill = db.Column(db.Boolean, default=True)  # 新增：是否启用快填功能，默认启用
+    deleted_at = db.Column(db.DateTime, nullable=True, index=True)  # 软删除：移入回收站时间
     questions = db.relationship('Question', backref='survey', lazy=True)
     qr_codes = db.relationship('QRCode', backref='survey', lazy=True)
+
+def active_surveys_query():
+    return Survey.query.filter(Survey.deleted_at.is_(None))
+
+def trashed_surveys_query():
+    return Survey.query.filter(Survey.deleted_at.isnot(None))
+
+def survey_is_publicly_available(survey):
+    return bool(survey and survey.deleted_at is None and survey.is_active)
+
+def get_active_survey_or_404(survey_id):
+    survey = Survey.query.get_or_404(survey_id)
+    if survey.deleted_at is not None:
+        abort(404)
+    return survey
 
 class Question(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -208,7 +232,7 @@ def index():
     if current_user.is_authenticated and current_user.is_admin:
         # 管理员首页统一走 /admin，避免遗漏 survey_stats 导致“现有问卷”只剩计数徽章
         return redirect(url_for('admin'))
-    surveys = Survey.query.filter_by(is_active=True).all()
+    surveys = active_surveys_query().filter_by(is_active=True).all()
     return render_template('index.html', surveys=surveys)
 
 @app.route('/admin_login', methods=['GET', 'POST'])
@@ -254,7 +278,7 @@ def admin():
     guard = ensure_admin_session()
     if guard:
         return guard
-    surveys = Survey.query.filter_by(is_active=True).all()
+    surveys = active_surveys_query().filter_by(is_active=True).all()
     
     # 计算每个问卷的数据条数
     survey_stats = []
@@ -352,7 +376,7 @@ def generate_qr(survey_id):
     if guard:
         return guard
     
-    survey = Survey.query.get_or_404(survey_id)
+    survey = get_active_survey_or_404(survey_id)
     num_users = int(request.form.get('num_users', 0))
     
     if num_users <= 0:
@@ -460,6 +484,11 @@ def login_with_qr(token):
     if not qr:
         flash('无效的二维码', 'danger')
         return redirect(url_for('thank_you'))
+
+    survey = Survey.query.get(qr.survey_id)
+    if not survey_is_publicly_available(survey):
+        flash('该问卷已下架或已移入回收站', 'danger')
+        return redirect(url_for('thank_you'))
     
     # 查找或创建用户
     user = User.query.filter_by(qr_code=token).first()
@@ -511,7 +540,7 @@ def preview_survey(survey_id):
 @app.route('/vote/<int:survey_id>')
 @login_required
 def vote(survey_id):
-    survey = Survey.query.get_or_404(survey_id)
+    survey = get_active_survey_or_404(survey_id)
     questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
     
     respondents = []
@@ -542,7 +571,7 @@ def set_option_limits(survey_id):
     if guard:
         return guard
     
-    survey = Survey.query.get_or_404(survey_id)
+    survey = get_active_survey_or_404(survey_id)
     
     # 根据问卷类型确定可用的选项范围
     if survey.type == 'table':
@@ -606,8 +635,8 @@ def save_vote_to_db(vote_data, retry_count=0):
         survey_id = vote_data['survey_id']
         user_id = vote_data['user_id']
         survey = session.get(Survey, survey_id)
-        if not survey:
-            logger.error(f"问卷不存在: survey_id={survey_id}")
+        if not survey or not survey_is_publicly_available(survey):
+            logger.error(f"问卷不存在或已下架: survey_id={survey_id}")
             return
         
         # 删除旧投票
@@ -655,7 +684,7 @@ def save_vote_to_db(vote_data, retry_count=0):
 @app.route('/submit_vote/<int:survey_id>', methods=['POST'])
 @login_required
 def submit_vote(survey_id):
-    survey = Survey.query.get_or_404(survey_id)
+    survey = get_active_survey_or_404(survey_id)
     
     # 保存用户的选择到session，以便验证失败时恢复
     saved_choices = {}
@@ -1028,7 +1057,7 @@ def copy_survey(survey_id):
     if guard:
         return guard
     
-    original_survey = Survey.query.get_or_404(survey_id)
+    original_survey = get_active_survey_or_404(survey_id)
     
     try:
         # 创建新问卷
@@ -1075,40 +1104,115 @@ def copy_survey(survey_id):
     
     return redirect(url_for('admin'))
 
+def _permanent_delete_survey_data(survey_id: int) -> None:
+    """永久删除问卷及其全部关联数据（仅用于回收站）。"""
+    Vote.query.filter(Vote.question.has(survey_id=survey_id)).delete(synchronize_session='fetch')
+    SubjectiveAnswer.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
+    Question.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
+    TableRespondent.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
+    QRCode.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
+    survey = Survey.query.get(survey_id)
+    if survey:
+        db.session.delete(survey)
+
 @app.route('/admin/delete_survey/<int:survey_id>', methods=['POST'])
 def delete_survey(survey_id):
     guard = ensure_admin_session()
     if guard:
         return guard
-    
-    survey = Survey.query.get_or_404(survey_id)
-    
+
+    survey = get_active_survey_or_404(survey_id)
+
     try:
-        # 删除与问卷相关的所有投票记录
-        Vote.query.filter(Vote.question.has(survey_id=survey_id)).delete(synchronize_session='fetch')
-        # 删除与问卷相关的所有问题
-        Question.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
-        # 删除与问卷相关的所有人名（如果问卷是表格类型）
-        TableRespondent.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
-        # 删除与问卷相关的所有二维码
-        QRCode.query.filter_by(survey_id=survey_id).delete(synchronize_session='fetch')
-        
-        # 最后删除问卷本身
-        db.session.delete(survey)
+        survey.deleted_at = get_current_time()
+        survey.is_active = False
         db.session.commit()
-        flash(f'问卷 "{survey.name}" 及其所有相关数据已删除', 'success')
+        flash(f'问卷 "{survey.name}" 已移入回收站，可在回收站中恢复', 'success')
     except Exception as e:
         db.session.rollback()
-        flash(f'删除问卷失败: {e}', 'danger')
-        
+        flash(f'移入回收站失败: {e}', 'danger')
+
     return redirect(url_for('admin'))
+
+@app.route('/admin/trash')
+@app.route('/admin/trash/')
+def admin_trash():
+    guard = ensure_admin_session()
+    if guard:
+        return guard
+
+    trashed = trashed_surveys_query().order_by(Survey.deleted_at.desc()).all()
+    survey_stats = []
+    for survey in trashed:
+        if survey.type == 'single_choice':
+            vote_count = Vote.query.join(Question).filter(Question.survey_id == survey.id).count()
+        elif survey.type == 'table':
+            vote_count = Vote.query.join(Question).join(TableRespondent).filter(
+                Question.survey_id == survey.id,
+                TableRespondent.survey_id == survey.id
+            ).count()
+        else:
+            vote_count = 0
+        subjective_count = SubjectiveAnswer.query.filter_by(survey_id=survey.id).count()
+        survey_stats.append({
+            'survey': survey,
+            'vote_count': vote_count,
+            'subjective_count': subjective_count,
+            'total_count': vote_count + subjective_count,
+        })
+
+    return render_template('trash.html', survey_stats=survey_stats)
+
+@app.route('/admin/restore_survey/<int:survey_id>', methods=['POST'])
+def restore_survey(survey_id):
+    guard = ensure_admin_session()
+    if guard:
+        return guard
+
+    survey = Survey.query.get_or_404(survey_id)
+    if survey.deleted_at is None:
+        flash('该问卷不在回收站中', 'warning')
+        return redirect(url_for('admin'))
+
+    try:
+        survey.deleted_at = None
+        survey.is_active = True
+        db.session.commit()
+        flash(f'问卷 "{survey.name}" 已恢复', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'恢复失败: {e}', 'danger')
+
+    return redirect(url_for('admin_trash'))
+
+@app.route('/admin/permanent_delete_survey/<int:survey_id>', methods=['POST'])
+def permanent_delete_survey(survey_id):
+    guard = ensure_admin_session()
+    if guard:
+        return guard
+
+    survey = Survey.query.get_or_404(survey_id)
+    if survey.deleted_at is None:
+        flash('请先将问卷移入回收站，再在回收站中永久删除', 'warning')
+        return redirect(url_for('admin'))
+
+    name = survey.name
+    try:
+        _permanent_delete_survey_data(survey_id)
+        db.session.commit()
+        flash(f'问卷 "{name}" 已永久删除，无法恢复', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'永久删除失败: {e}', 'danger')
+
+    return redirect(url_for('admin_trash'))
 
 @app.route('/admin/edit_survey/<int:survey_id>', methods=['GET', 'POST'])
 def edit_survey(survey_id):
     guard = ensure_admin_session()
     if guard:
         return guard
-    survey = Survey.query.get_or_404(survey_id)
+    survey = get_active_survey_or_404(survey_id)
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -1255,7 +1359,7 @@ def update_survey_info(survey_id):
     guard = ensure_admin_session()
     if guard:
         return guard
-    survey = Survey.query.get_or_404(survey_id)
+    survey = get_active_survey_or_404(survey_id)
     
     survey.name = request.form.get('survey_name', '').strip()
     survey.introduction = request.form.get('survey_introduction', '').strip() or None
@@ -1438,6 +1542,62 @@ def move_question(question_id, direction):
         logger.error(f'移动问题失败: {e}')
         return {'success': False, 'message': f'移动失败: {str(e)}'}, 500
 
+_db_migrations_done = False
+
+def run_db_migrations():
+    """启动时补齐 SQLite 表结构（含回收站 deleted_at）。"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+
+    survey_columns = [col['name'] for col in inspector.get_columns('survey')]
+    if 'enable_quick_fill' not in survey_columns:
+        logger.info("检测到数据库需要迁移：添加 enable_quick_fill 列")
+        db.session.execute(text('ALTER TABLE survey ADD COLUMN enable_quick_fill INTEGER DEFAULT 1'))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 enable_quick_fill 列")
+
+    survey_columns = [col['name'] for col in inspector.get_columns('survey')]
+    if 'deleted_at' not in survey_columns:
+        logger.info("检测到数据库需要迁移：添加 deleted_at 列")
+        db.session.execute(text('ALTER TABLE survey ADD COLUMN deleted_at DATETIME'))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 deleted_at 列")
+
+    question_columns = [col['name'] for col in inspector.get_columns('question')]
+    if 'component_type' not in question_columns:
+        logger.info("检测到数据库需要迁移：添加 component_type 列")
+        db.session.execute(text("ALTER TABLE question ADD COLUMN component_type VARCHAR(50) DEFAULT 'standard'"))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 component_type 列")
+
+    question_columns = [col['name'] for col in inspector.get_columns('question')]
+    if 'custom_options' not in question_columns:
+        logger.info("检测到数据库需要迁移：添加 custom_options 列")
+        db.session.execute(text('ALTER TABLE question ADD COLUMN custom_options TEXT'))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 custom_options 列")
+
+    question_columns = [col['name'] for col in inspector.get_columns('question')]
+    if 'order_index' not in question_columns:
+        logger.info("检测到数据库需要迁移：添加 order_index 列")
+        db.session.execute(text('ALTER TABLE question ADD COLUMN order_index INTEGER DEFAULT 0'))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 order_index 列")
+
+
+@app.before_request
+def _ensure_db_migrations_once():
+    global _db_migrations_done
+    if _db_migrations_done:
+        return
+    try:
+        run_db_migrations()
+        _db_migrations_done = True
+    except Exception as e:
+        logger.warning(f"数据库迁移检查失败（可能是新数据库）: {e}")
+        db.session.rollback()
+
 if __name__ == '__main__':
     # 配置日志
     logging.basicConfig(
@@ -1447,46 +1607,8 @@ if __name__ == '__main__':
     
     with app.app_context():
         db.create_all()
-        
-        # 数据库迁移：添加缺失的列
         try:
-            from sqlalchemy import inspect, text
-            inspector = inspect(db.engine)
-            
-            # 检查 survey 表的列
-            survey_columns = [col['name'] for col in inspector.get_columns('survey')]
-            
-            # 检查并添加 enable_quick_fill 列（如果不存在）
-            if 'enable_quick_fill' not in survey_columns:
-                logger.info("检测到数据库需要迁移：添加 enable_quick_fill 列")
-                # SQLite 中 BOOLEAN 存储为 INTEGER (0 或 1)
-                db.session.execute(text('ALTER TABLE survey ADD COLUMN enable_quick_fill INTEGER DEFAULT 1'))
-                db.session.commit()
-                logger.info("数据库迁移完成：已添加 enable_quick_fill 列")
-            
-            # 检查 question 表的列
-            question_columns = [col['name'] for col in inspector.get_columns('question')]
-            
-            # 检查并添加 component_type 列（如果不存在）
-            if 'component_type' not in question_columns:
-                logger.info("检测到数据库需要迁移：添加 component_type 列")
-                db.session.execute(text("ALTER TABLE question ADD COLUMN component_type VARCHAR(50) DEFAULT 'standard'"))
-                db.session.commit()
-                logger.info("数据库迁移完成：已添加 component_type 列")
-            
-            # 检查并添加 custom_options 列（如果不存在）
-            if 'custom_options' not in question_columns:
-                logger.info("检测到数据库需要迁移：添加 custom_options 列")
-                db.session.execute(text('ALTER TABLE question ADD COLUMN custom_options TEXT'))
-                db.session.commit()
-                logger.info("数据库迁移完成：已添加 custom_options 列")
-            
-            # 检查并添加 order_index 列（如果不存在）
-            if 'order_index' not in question_columns:
-                logger.info("检测到数据库需要迁移：添加 order_index 列")
-                db.session.execute(text('ALTER TABLE question ADD COLUMN order_index INTEGER DEFAULT 0'))
-                db.session.commit()
-                logger.info("数据库迁移完成：已添加 order_index 列")
+            run_db_migrations()
         except Exception as e:
             logger.warning(f"数据库迁移检查失败（可能是新数据库）: {e}")
             db.session.rollback()

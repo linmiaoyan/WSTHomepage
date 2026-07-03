@@ -16,13 +16,18 @@
     
     .admin-header {
         margin-bottom: 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem;
     }
     
     .admin-header h2 {
         font-size: 1.75rem;
         font-weight: 600;
         color: #1a202c;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0;
     }
     
     /* 创建表单区域 - 使用网格布局 */
@@ -333,6 +338,9 @@
 <div class="admin-container admin-content">
     <div class="admin-header">
         <h2>问卷管理</h2>
+        <a href="{{ url_for('admin_trash') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-trash"></i> 回收站{% if trash_count %} <span class="badge bg-danger">{{ trash_count }}</span>{% endif %}
+        </a>
     </div>
     
     <!-- 创建新问卷 -->
@@ -436,9 +444,11 @@
                                     <button type="submit" class="btn btn-outline-warning btn-sm w-100" title="复制">复制</button>
                                 </form>
                                 <form action="{{ url_for('delete_survey', survey_id=survey.id) }}" method="post" 
-                                      onsubmit="return confirm('您确定要删除问卷 \"{{ survey.name }}\" 及其所有相关数据吗？此操作不可撤销！');" 
+                                      onsubmit="return confirm('确定将问卷「{{ survey.name }}」移入回收站吗？可在回收站中恢复。');" 
                                       style="display:inline; flex: 1;">
-                                    <button type="submit" class="btn btn-outline-danger btn-sm w-100" title="删除">删除</button>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm w-100" title="移入回收站">
+                                        <i class="bi bi-trash"></i> 删除
+                                    </button>
                                 </form>
                             </div>
                             <form action="{{ url_for('generate_qr', survey_id=survey.id) }}" method="post" class="mt-1">

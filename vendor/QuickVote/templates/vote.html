@@ -197,13 +197,13 @@
 
 
     
-    <form action="{% if is_preview %}#{% else %}{{ url_for('submit_vote', survey_id=survey.id) }}{% endif %}" method="{% if is_preview %}get{% else %}post{% endif %}" id="voteForm" novalidate {% if is_preview %}onsubmit="alert('预览模式下无法提交数据'); return false;"{% endif %}>
+    <form action="{% if is_preview %}#{% else %}{{ url_for('submit_vote', survey_id=survey.id) }}{% endif %}" method="{% if is_preview %}get{% else %}post{% endif %}" id="voteForm" novalidate data-count-scope="{% if survey.type == 'table' %}#vote-table{% else %}.question-card{% endif %}" data-option-limits='{{ (survey.option_limits or {})|tojson }}' {% if is_preview %}onsubmit="alert('预览模式下无法提交数据'); return false;"{% endif %}>
         {% if survey.type == 'single_choice' %}
             <!-- 单选题问卷 -->
             <!-- 快速填写按钮（圆形悬浮显示） -->
             {% if enable_quick_fill %}
-            <button type="button" id="quick-fill-btn-a" class="quick-fill-btn quick-fill-btn-a" title="按住自动选择第一个选项">按住快填A</button>
-            <button type="button" id="quick-fill-btn-b" class="quick-fill-btn quick-fill-btn-b" title="按住自动选择第二个选项">按住快填B</button>
+            <button type="button" id="quick-fill-btn-a" class="quick-fill-btn quick-fill-btn-a" title="按住后依次为未选题目填 A">按住快填A</button>
+            <button type="button" id="quick-fill-btn-b" class="quick-fill-btn quick-fill-btn-b" title="按住后依次为未选题目填 B">按住快填B</button>
             {% endif %}
             
             {% if survey.option_limits %}
@@ -254,8 +254,8 @@
             <!-- 表格问卷 -->
             <!-- 快速打分按钮（圆形悬浮显示） -->
             {% if enable_quick_fill %}
-            <button type="button" id="quick-score-btn-a" class="quick-fill-btn quick-fill-btn-a" title="按住自动选择第一个选项">按住快填A</button>
-            <button type="button" id="quick-score-btn-b" class="quick-fill-btn quick-fill-btn-b" title="按住自动选择第二个选项">按住快填B</button>
+            <button type="button" id="quick-score-btn-a" class="quick-fill-btn quick-fill-btn-a" title="按住后依次为表格空格填 A">按住快填A</button>
+            <button type="button" id="quick-score-btn-b" class="quick-fill-btn quick-fill-btn-b" title="按住后依次为表格空格填 B">按住快填B</button>
             {% endif %}
             
             {% if survey.option_limits %}
@@ -377,74 +377,108 @@
     </form>
 </div>
 
-{% if survey.type == 'single_choice' and survey.option_limits %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const optionLimits = {{ survey.option_limits|tojson|safe }};
-    const optionList = Object.keys(optionLimits);
-    const tooltip = document.getElementById('option-limit-tooltip');
-
-    function updateOptionCounts() {
-        const counts = {};
-        optionList.forEach(opt => counts[opt] = 0);
-        document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
-            const val = radio.value;
-            if (counts[val] !== undefined) counts[val]++;
-        });
-        
-        // 更新悬浮提示框
-        if (tooltip) {
-            let html = '<div class="tooltip-title">选项限制状态</div>';
-            let hasActiveLimits = false;
-
-            optionList.sort().forEach(option => {
-                const limit = optionLimits[option];
-                const count = counts[option] || 0;
-                
-                if (limit && limit > 0) {
-                    hasActiveLimits = true;
-                    const percentage = (count / limit) * 100;
-                    const isWarning = percentage >= 80;
-                    const isDanger = percentage >= 100;
-                    
-                    const color = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
-                    
-                    html += `
-                        <div class="option-item">
-                            <div class="option-header">
-                                <span class="option-name">选项 ${option}:</span>
-                                <span class="option-count" style="color: ${color};">${count} / ${limit}</span>
-                            </div>
-                            <div class="option-progress">
-                                <div class="option-progress-bar" style="background: ${color}; width: ${Math.min(percentage, 100)}%;"></div>
-                            </div>
-                        </div>
-                    `;
-                }
-            });
-
-            if (hasActiveLimits) {
-                tooltip.innerHTML = html;
-                tooltip.style.display = 'block';
-            } else {
-                tooltip.style.display = 'none';
-            }
+(function() {
+    function parseOptionLimits() {
+        const form = document.getElementById('voteForm');
+        if (!form) return {};
+        try {
+            return JSON.parse(form.getAttribute('data-option-limits') || '{}') || {};
+        } catch (e) {
+            return {};
         }
     }
 
-    // 绑定所有radio的change事件
-    document.querySelectorAll('input[type="radio"]').forEach(radio => {
+    function getCountScope() {
+        const form = document.getElementById('voteForm');
+        return (form && form.getAttribute('data-count-scope')) || '#vote-table';
+    }
+
+    window.qvGetOptionLimits = parseOptionLimits;
+
+    window.qvCountLimitedOptions = function() {
+        const limits = parseOptionLimits();
+        const scope = getCountScope();
+        const counts = {};
+        Object.keys(limits).forEach(function(k) { counts[k] = 0; });
+        document.querySelectorAll(scope + ' input[type="radio"]:checked').forEach(function(radio) {
+            if (counts[radio.value] !== undefined) counts[radio.value] += 1;
+        });
+        return counts;
+    };
+
+    window.qvRenderLimitTooltip = function(tooltip) {
+        if (!tooltip) return;
+        const limits = parseOptionLimits();
+        const counts = window.qvCountLimitedOptions();
+        const optionList = Object.keys(limits);
+        let html = '<div class="tooltip-title">选项限制状态</div>';
+        let hasActiveLimits = false;
+        optionList.sort().forEach(function(option) {
+            const limit = limits[option];
+            const count = counts[option] || 0;
+            if (!limit || limit <= 0) return;
+            hasActiveLimits = true;
+            const percentage = (count / limit) * 100;
+            const isWarning = percentage >= 80;
+            const isDanger = percentage >= 100;
+            const color = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
+            html += '<div class="option-item"><div class="option-header"><span class="option-name">选项 ' + option + ':</span><span class="option-count" style="color:' + color + ';">' + count + ' / ' + limit + '</span></div><div class="option-progress"><div class="option-progress-bar" style="background:' + color + '; width:' + Math.min(percentage, 100) + '%;"></div></div></div>';
+        });
+        if (hasActiveLimits) {
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+        } else {
+            tooltip.style.display = 'none';
+        }
+    };
+
+    window.qvUpdateLimitTooltip = function() {
+        window.qvRenderLimitTooltip(document.getElementById('option-limit-tooltip'));
+    };
+
+    window.qvSelectRadioValue = function(radios, targetValue, allowOverwrite) {
+        const list = Array.from(radios || []);
+        const target = list.find(function(r) { return r.value === targetValue; });
+        if (!target) return { ok: false, reason: 'missing_option' };
+        const checked = list.find(function(r) { return r.checked; });
+        if (checked && checked.value === targetValue) {
+            return { ok: true, changed: false };
+        }
+        if (checked && !allowOverwrite) {
+            return { ok: false, reason: 'already_filled' };
+        }
+        const limits = parseOptionLimits();
+        const limit = limits[targetValue];
+        if (limit && limit > 0) {
+            const counts = window.qvCountLimitedOptions();
+            let next = (counts[targetValue] || 0) + 1;
+            if (checked && checked.value !== targetValue && counts[checked.value] !== undefined) {
+                // 覆盖为 B 时，当前格子的旧选项会释放一个名额
+                next -= 1;
+            }
+            if (next > limit) {
+                return { ok: false, reason: 'limit_reached', option: targetValue, limit: limit };
+            }
+        }
+        target.click();
+        return { ok: true, changed: true };
+    };
+})();
+</script>
+
+{% if survey.type == 'single_choice' and survey.option_limits %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tooltip = document.getElementById('option-limit-tooltip');
+    function updateOptionCounts() {
+        window.qvUpdateLimitTooltip();
+    }
+    const scope = document.querySelector('#voteForm')?.getAttribute('data-count-scope') || '.question-card';
+    document.querySelectorAll(scope + ' input[type="radio"]').forEach(function(radio) {
         radio.addEventListener('change', updateOptionCounts);
     });
-
-    // 页面加载时初始化一次（包括恢复保存的选择后）
     updateOptionCounts();
-    
-    // 如果有保存的选择，触发change事件以确保计数正确更新
-    document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
-        const changeEvent = new Event('change', { bubbles: true });
-        radio.dispatchEvent(changeEvent);
-    });
 });
 </script>
 {% endif %}
@@ -578,75 +612,13 @@ function initTableZoom() {
 {% if survey.option_limits %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const optionLimits = {{ survey.option_limits|tojson|safe }};
-    const optionList = Object.keys(optionLimits);
-    const tooltip = document.getElementById('option-limit-tooltip');
-
     function updateTableOptionCounts() {
-        const counts = {};
-        optionList.forEach(opt => counts[opt] = 0);
-        // 统计表格中所有已选择的选项
-        document.querySelectorAll('#vote-table input[type="radio"]:checked').forEach(radio => {
-            const val = radio.value;
-            if (counts[val] !== undefined) counts[val]++;
-        });
-        
-        // 更新悬浮提示框
-        if (tooltip) {
-            let html = '<div class="tooltip-title">选项限制状态</div>';
-            let hasActiveLimits = false;
-
-            optionList.sort().forEach(option => {
-                const limit = optionLimits[option];
-                const count = counts[option] || 0;
-                
-                if (limit && limit > 0) {
-                    hasActiveLimits = true;
-                    const percentage = (count / limit) * 100;
-                    const isWarning = percentage >= 80;
-                    const isDanger = percentage >= 100;
-                    
-                    const color = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
-                    const status = isDanger ? '已满' : isWarning ? '接近' : '正常';
-                    
-                    html += `
-                        <div class="option-item">
-                            <div class="option-header">
-                                <span class="option-name">选项 ${option}:</span>
-                                <span class="option-count" style="color: ${color};">${count} / ${limit}</span>
-                            </div>
-                            <div class="option-progress">
-                                <div class="option-progress-bar" style="background: ${color}; width: ${Math.min(percentage, 100)}%;"></div>
-                            </div>
-                        </div>
-                    `;
-                }
-            });
-
-            if (hasActiveLimits) {
-                tooltip.innerHTML = html;
-                tooltip.style.display = 'block';
-            } else {
-                tooltip.style.display = 'none';
-            }
-        }
+        window.qvUpdateLimitTooltip();
     }
-
-    // 绑定所有radio的change事件
-    document.querySelectorAll('#vote-table input[type="radio"]').forEach(radio => {
+    document.querySelectorAll('#vote-table input[type="radio"]').forEach(function(radio) {
         radio.addEventListener('change', updateTableOptionCounts);
     });
-
-    // 页面加载时初始化一次（包括恢复保存的选择后）
     updateTableOptionCounts();
-    
-    // 如果有保存的选择，触发change事件以确保计数正确更新
-    document.querySelectorAll('#vote-table input[type="radio"]:checked').forEach(radio => {
-        const changeEvent = new Event('change', { bubbles: true });
-        radio.dispatchEvent(changeEvent);
-    });
-
-    // 初始化表格缩放功能
     setTimeout(initTableZoom, 100);
 });
 </script>
@@ -693,14 +665,12 @@ document.addEventListener('DOMContentLoaded', function() {
         let isQuickFilling = false;
         let currentQuestionIndex = 0;
         let fillTimeout = null;
-        let currentOptionIndex = 0; // 0表示选择第一个选项，1表示选择第二个选项
+        let currentOptionIndex = 0; // 兼容旧变量名
+        let currentTargetValue = 'A';
         let currentBtn = null; // 当前被按下的按钮
+        let limitAlertShown = false;
         
-        // 获取所有问题卡片（确保获取到所有包含radio的卡片）
-        const questionCards = Array.from(document.querySelectorAll('.card.mb-3')).filter(card => {
-            const hasRadio = card.querySelector('input[type="radio"]') !== null;
-            return hasRadio;
-        });
+        const questionCards = Array.from(document.querySelectorAll('.question-card'));
         
         console.log('找到问题卡片数量:', questionCards.length);
         
@@ -721,42 +691,21 @@ document.addEventListener('DOMContentLoaded', function() {
             
             const currentCard = questionCards[currentQuestionIndex];
             if (currentCard) {
-                // 获取当前问题的所有radio选项
                 const radios = currentCard.querySelectorAll('input[type="radio"]');
-                
-                // 选择指定索引的选项（currentOptionIndex: 0表示第一个，1表示第二个）
-                if (radios.length > currentOptionIndex) {
-                    const targetRadio = radios[currentOptionIndex];
-                    if (targetRadio && !targetRadio.checked) {
-                        // 先设置checked属性
-                        targetRadio.checked = true;
-                        
-                        // 找到对应的label并触发点击（这样会更新样式）
-                        const labelId = targetRadio.id;
-                        const label = document.querySelector(`label[for="${labelId}"]`);
-                        if (label) {
-                            // 触发label的点击事件来更新样式
-                            label.click();
-                        }
-                        
-                        // 触发change事件，更新选项计数等
-                        const changeEvent = new Event('change', { bubbles: true });
-                        targetRadio.dispatchEvent(changeEvent);
-                        
-                        // 触发input事件
-                        const inputEvent = new Event('input', { bubbles: true });
-                        targetRadio.dispatchEvent(inputEvent);
-                        
-                        console.log('已选择问题', currentQuestionIndex + 1, '的选项', targetRadio.value);
-                        
-                        // 滚动到当前问题（延迟一点让选择生效）
-                        setTimeout(() => {
-                            currentCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }, 50);
+                const result = window.qvSelectRadioValue(radios, currentTargetValue, false);
+                if (result.reason === 'limit_reached') {
+                    if (!limitAlertShown) {
+                        limitAlertShown = true;
+                        alert('选项 ' + result.option + ' 已达到上限 ' + result.limit + ' 次，已停止快填。');
                     }
+                    stopQuickFilling();
+                    return;
                 }
-                
-                // 移动到下一个问题
+                if (result.ok && result.changed) {
+                    setTimeout(function() {
+                        currentCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 50);
+                }
                 currentQuestionIndex++;
             } else {
                 currentQuestionIndex++;
@@ -802,6 +751,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             isQuickFilling = true;
             currentOptionIndex = optionIndex;
+            currentTargetValue = optionIndex === 0 ? 'A' : 'B';
+            limitAlertShown = false;
             currentBtn = btn;
             btn.classList.add('active');
             btn.textContent = '填写中';
@@ -978,7 +929,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentPage = 1;
     let isQuickScoring = false;
     let quickScoreTimeout = null;
-    let currentOptionIndex = 0; // 0表示选择第一个选项，1表示选择第二个选项
+    let currentOptionIndex = 0;
+    let currentTargetValue = 'A';
+    let limitAlertShown = false;
     let currentBtn = null; // 当前被按下的按钮
     
     // 检测是否为移动设备
@@ -1188,57 +1141,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // 检查是否已填写
             const radios = btnGroup.querySelectorAll('input[type="radio"]');
-            let isFilled = false;
-            for (let radio of radios) {
-                if (radio.checked) {
-                    isFilled = true;
-                    break;
+            const result = window.qvSelectRadioValue(radios, currentTargetValue, false);
+            if (result.reason === 'limit_reached') {
+                if (!limitAlertShown) {
+                    limitAlertShown = true;
+                    alert('选项 ' + result.option + ' 已达到上限 ' + result.limit + ' 次，已停止快填。');
                 }
+                stopQuickScoring();
+                return;
             }
-            
-            if (isFilled) {
-                // 已填写，跳过到下一个
+            if (result.reason === 'already_filled') {
                 currentQuestionIndex++;
                 if (isQuickScoring) {
                     quickScoreTimeout = setTimeout(autoSelectOption, 50);
                 }
                 return;
             }
-            
-            // 选择指定索引的选项（currentOptionIndex: 0表示第一个，1表示第二个）
-            if (radios.length > currentOptionIndex) {
-                const targetRadio = radios[currentOptionIndex];
-                if (targetRadio) {
-                    // 设置checked属性
-                    targetRadio.checked = true;
-                    
-                    // 找到对应的label并触发点击（更新样式）
-                    const labelId = targetRadio.id;
-                    const label = btnGroup.querySelector(`label[for="${labelId}"]`);
-                    if (label) {
-                        label.click();
-                    }
-                    
-                    // 触发change事件
-                    const changeEvent = new Event('change', { bubbles: true });
-                    targetRadio.dispatchEvent(changeEvent);
-                    
-                    // 触发input事件
-                    const inputEvent = new Event('input', { bubbles: true });
-                    targetRadio.dispatchEvent(inputEvent);
-                    
-                    console.log('已选择第', currentRowIndex + 1, '行第', currentQuestionIndex + 1, '题的选项', targetRadio.value);
-                    
-                    // 滚动到当前单元格（可选，让用户看到进度）
-                    setTimeout(() => {
-                        currentCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 50);
+            if (!result.ok) {
+                currentQuestionIndex++;
+                if (isQuickScoring) {
+                    quickScoreTimeout = setTimeout(autoSelectOption, 50);
                 }
+                return;
+            }
+            if (result.changed) {
+                setTimeout(function() {
+                    currentCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 50);
             }
             
-            // 移动到下一个问题
             currentQuestionIndex++;
             
             // 继续下一个选择
@@ -1295,6 +1227,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             isQuickScoring = true;
             currentOptionIndex = optionIndex;
+            currentTargetValue = optionIndex === 0 ? 'A' : 'B';
+            limitAlertShown = false;
             currentBtn = btn;
             btn.classList.add('active');
             btn.textContent = '填写中';

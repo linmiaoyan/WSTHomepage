@@ -14,22 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // 评分按钮组交互
-    const btnGroups = document.querySelectorAll('.btn-group');
-    btnGroups.forEach(group => {
-        const buttons = group.querySelectorAll('.btn-outline-primary');
-        buttons.forEach(button => {
-            button.addEventListener('click', function() {
-                const radio = this.previousElementSibling;
-                if (radio) {
-                    radio.checked = true;
-                    // 手动触发 change 事件
-                    radio.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            });
-        });
-    });
-
+    // Bootstrap btn-check 已通过 label[for] 关联 radio，无需再手动绑定 click
     // 自动隐藏提示消息
     const alerts = document.querySelectorAll('.alert');
     alerts.forEach(alert => {

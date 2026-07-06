@@ -373,12 +373,17 @@ body {
 }
 
 .quick-fill-btn-a {
-    right: 110px;
+    right: 190px;
 }
 
 .quick-fill-btn-b {
-    right: 30px;
+    right: 110px;
     background-color: #4299e1;
+}
+
+.quick-fill-btn-clear {
+    right: 30px;
+    background-color: #718096;
 }
 
 .quick-fill-btn:active {
@@ -415,10 +420,14 @@ body {
     }
     
     .quick-fill-btn-a {
-        right: 100px;
+        right: 185px;
     }
     
     .quick-fill-btn-b {
+        right: 100px;
+    }
+
+    .quick-fill-btn-clear {
         right: 15px;
     }
     

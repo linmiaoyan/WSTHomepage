@@ -204,6 +204,7 @@
             {% if enable_quick_fill %}
             <button type="button" id="quick-fill-btn-a" class="quick-fill-btn quick-fill-btn-a" title="将所有题目一键选为 A">一键全选A</button>
             <button type="button" id="quick-fill-btn-b" class="quick-fill-btn quick-fill-btn-b" title="将所有题目一键选为 B">一键全选B</button>
+            <button type="button" id="quick-clear-btn" class="quick-fill-btn quick-fill-btn-clear" title="清除本页所有已选答案">一键清除</button>
             {% endif %}
             
             {% if survey.option_limits %}
@@ -256,6 +257,7 @@
             {% if enable_quick_fill %}
             <button type="button" id="quick-score-btn-a" class="quick-fill-btn quick-fill-btn-a" title="将表格内所有格子一键选为 A">一键全选A</button>
             <button type="button" id="quick-score-btn-b" class="quick-fill-btn quick-fill-btn-b" title="将表格内所有格子一键选为 B">一键全选B</button>
+            <button type="button" id="quick-score-clear-btn" class="quick-fill-btn quick-fill-btn-clear" title="清除表格与页面上所有已选答案">一键清除</button>
             {% endif %}
             
             {% if survey.option_limits %}
@@ -517,6 +519,50 @@
             }
         });
     };
+
+    window.qvClearAllSelections = function() {
+        const form = document.getElementById('voteForm');
+        if (!form) return { cleared: 0 };
+        let cleared = 0;
+        window.qvCollectRadioGroups('#voteForm').forEach(function(radios) {
+            const checked = radios.find(function(r) { return r.checked; });
+            if (!checked) return;
+            checked.checked = false;
+            checked.dispatchEvent(new Event('change', { bubbles: true }));
+            cleared += 1;
+        });
+        const subjective = document.getElementById('subjective_answer');
+        if (subjective && subjective.value.trim()) {
+            subjective.value = '';
+            cleared += 1;
+        }
+        document.querySelectorAll('.missing-field-alert').forEach(function(el) {
+            el.style.display = 'none';
+        });
+        document.querySelectorAll('.vote-missing-cell').forEach(function(el) {
+            el.classList.remove('vote-missing-cell');
+        });
+        const err = document.getElementById('vote-form-error');
+        if (err) {
+            err.style.display = 'none';
+            err.textContent = '';
+        }
+        if (typeof window.qvUpdateLimitTooltip === 'function') {
+            window.qvUpdateLimitTooltip();
+        }
+        return { cleared: cleared };
+    };
+
+    window.qvBindClearAllButton = function(btn) {
+        if (!btn) return;
+        btn.addEventListener('click', function() {
+            if (!confirm('确定清除当前问卷页面上所有已选答案吗？')) return;
+            const result = window.qvClearAllSelections();
+            if (result.cleared === 0) {
+                alert('当前没有可清除的选项。');
+            }
+        });
+    };
 })();
 </script>
 
@@ -712,6 +758,7 @@ document.addEventListener('DOMContentLoaded', function() {
 document.addEventListener('DOMContentLoaded', function() {
     window.qvBindSelectAllButton(document.getElementById('quick-fill-btn-a'), 'A');
     window.qvBindSelectAllButton(document.getElementById('quick-fill-btn-b'), 'B');
+    window.qvBindClearAllButton(document.getElementById('quick-clear-btn'));
 });
 </script>
 {% endif %}
@@ -805,6 +852,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     window.qvBindSelectAllButton(document.getElementById('quick-score-btn-a'), 'A');
     window.qvBindSelectAllButton(document.getElementById('quick-score-btn-b'), 'B');
+    window.qvBindClearAllButton(document.getElementById('quick-score-clear-btn'));
 });
 </script>
 {% endif %}

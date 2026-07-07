@@ -20,6 +20,9 @@
             {% if session.get('is_admin') or (current_user.is_authenticated and current_user.is_admin) %}
             <a class="nav-link" href="{{ url_for('admin') }}"><i class="bi bi-speedometer2"></i> 管理面板</a>
             <a class="nav-link" href="{{ url_for('admin_trash') }}"><i class="bi bi-trash"></i> 回收站{% if trash_count %} <span class="badge bg-danger">{{ trash_count }}</span>{% endif %}</a>
+            {% if current_user.is_authenticated and current_user.is_admin and current_user.is_super_admin %}
+            <a class="nav-link" href="{{ url_for('admin_tenants') }}"><i class="bi bi-shield-lock"></i> 多学校管理</a>
+            {% endif %}
             <a class="nav-link" href="{{ url_for('admin_logout') }}"><i class="bi bi-box-arrow-right"></i> 退出登录</a>
             {% endif %}
         </div>

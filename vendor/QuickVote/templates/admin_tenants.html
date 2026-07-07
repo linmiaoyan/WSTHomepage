@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .admin-container { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }
+  .section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+  .section h3 { font-size: 1.125rem; font-weight: 700; margin: 0 0 1rem 0; color: #1a202c; }
+  .muted { color: #718096; font-size: 0.9rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem; }
+</style>
+
+<div class="admin-container">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h2 class="m-0"><i class="bi bi-shield-lock"></i> 超级管理员：多学校管理</h2>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin') }}"><i class="bi bi-arrow-left"></i> 返回管理面板</a>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>创建学校（Tenant）</h3>
+    <form method="post">
+      <input type="hidden" name="action" value="create_tenant" />
+      <div class="grid">
+        <div>
+          <label class="form-label">学校/地区名称</label>
+          <input class="form-control" name="tenant_name" placeholder="例如：温科高 / XX中学" required />
+          <div class="muted mt-1">用于展示与区分租户</div>
+        </div>
+        <div>
+          <label class="form-label">标识（slug，可选）</label>
+          <input class="form-control" name="tenant_slug" placeholder="例如：wzkgz（只允许英文数字和短横线）" />
+          <div class="muted mt-1">留空将自动从名称生成</div>
+        </div>
+      </div>
+      <button class="btn btn-primary mt-3" type="submit"><i class="bi bi-plus-circle"></i> 创建学校</button>
+    </form>
+  </div>
+
+  <div class="section">
+    <h3>创建学校管理员账号</h3>
+    <form method="post">
+      <input type="hidden" name="action" value="create_admin" />
+      <div class="grid">
+        <div>
+          <label class="form-label">学校</label>
+          <select class="form-select" name="tenant_id" required>
+            {% for t in tenants %}
+              <option value="{{ t.id }}">{{ t.id }} · {{ t.name }} ({{ t.slug }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="form-label">管理员账号</label>
+          <input class="form-control" name="admin_username" placeholder="例如：hz_admin" required />
+        </div>
+        <div>
+          <label class="form-label">管理员密码</label>
+          <input class="form-control" name="admin_password" type="password" placeholder="设置一个强密码" required />
+        </div>
+      </div>
+      <button class="btn btn-success mt-3" type="submit"><i class="bi bi-person-plus"></i> 创建管理员</button>
+    </form>
+  </div>
+
+  <div class="section">
+    <h3>切换管理视角（超管查看某学校数据）</h3>
+    <form method="post" class="d-flex align-items-end flex-wrap gap-2">
+      <input type="hidden" name="action" value="switch_tenant" />
+      <div style="min-width: 320px;">
+        <label class="form-label">当前视角 tenant_id = {{ current_tenant_id }}</label>
+        <select class="form-select" name="tenant_id">
+          {% for t in tenants %}
+            <option value="{{ t.id }}" {% if t.id == current_tenant_id %}selected{% endif %}>{{ t.id }} · {{ t.name }} ({{ t.slug }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-outline-primary" type="submit"><i class="bi bi-arrow-repeat"></i> 切换并进入管理面板</button>
+    </form>
+  </div>
+
+  <div class="section">
+    <h3>管理员账号列表 / 重置密码</h3>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>用户名</th>
+            <th>Tenant</th>
+            <th>角色</th>
+            <th>重置密码</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in admins %}
+            <tr>
+              <td>{{ u.id }}</td>
+              <td>{{ u.username }}</td>
+              <td>{{ u.tenant_id or '-' }}</td>
+              <td>{% if u.is_super_admin %}超管{% else %}学校管理员{% endif %}</td>
+              <td>
+                {% if not u.is_super_admin %}
+                <form method="post" class="d-flex gap-2 align-items-center">
+                  <input type="hidden" name="action" value="reset_admin_password" />
+                  <input type="hidden" name="user_id" value="{{ u.id }}" />
+                  <input class="form-control form-control-sm" name="new_password" type="password" placeholder="新密码" required />
+                  <button class="btn btn-outline-danger btn-sm" type="submit">重置</button>
+                </form>
+                {% else %}
+                  <span class="muted">超管不支持在此重置</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="muted">提示：学校管理员登录后只可看到本学校数据；超管可切换视角查看不同学校。</div>
+  </div>
+</div>
+{% endblock %}
+

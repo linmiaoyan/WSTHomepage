@@ -28,6 +28,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 import json
+import re
 
 # 获取项目根目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -129,7 +130,11 @@ def inject_common_links():
             trash_count = trashed_surveys_query().count()
     except Exception:
         trash_count = 0
-    return {'portal_home_url': get_portal_home_url(), 'trash_count': trash_count}
+    return {
+        'portal_home_url': get_portal_home_url(),
+        'trash_count': trash_count,
+        'admin_tenant_id': session.get('admin_tenant_id'),
+    }
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -137,11 +142,20 @@ login_manager.init_app(app)
 login_manager.login_view = 'index'
 
 # 数据模型
+class Tenant(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    slug = db.Column(db.String(80), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=get_current_time)
+
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(120), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
+    is_super_admin = db.Column(db.Boolean, default=False)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=True)
     qr_code = db.Column(db.String(200), unique=True)
     votes = db.relationship('Vote', backref='user', lazy=True)
     subjective_answers = db.relationship(
@@ -153,6 +167,7 @@ class User(UserMixin, db.Model):
 
 class Survey(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     name = db.Column(db.String(200), nullable=False)
     type = db.Column(db.String(20), nullable=False)  # 'single_choice' 或 'table'
     introduction = db.Column(db.Text, nullable=True)  # 保留：问卷简介
@@ -166,11 +181,50 @@ class Survey(db.Model):
     questions = db.relationship('Question', backref='survey', lazy=True)
     qr_codes = db.relationship('QRCode', backref='survey', lazy=True)
 
+def _normalize_slug(s: str) -> str:
+    s = (s or '').strip().lower()
+    s = re.sub(r'[^a-z0-9\\-]+', '-', s)
+    s = re.sub(r'-{2,}', '-', s).strip('-')
+    return s or 'tenant'
+
+def _current_admin_tenant_id() -> int:
+    """当前管理视角下的 tenant_id；学校管理员固定为自身 tenant，超管可切换。"""
+    try:
+        if current_user.is_authenticated and getattr(current_user, 'is_admin', False):
+            if getattr(current_user, 'is_super_admin', False):
+                t = session.get('admin_tenant_id')
+                if t is not None and str(t).isdigit():
+                    return int(t)
+            if getattr(current_user, 'tenant_id', None):
+                return int(current_user.tenant_id)
+    except Exception:
+        pass
+    return 1
+
+def _ensure_default_tenant():
+    """确保至少存在一个默认租户，并返回其 id。"""
+    t = Tenant.query.order_by(Tenant.id.asc()).first()
+    if t:
+        return int(t.id)
+    t = Tenant(name='默认学校', slug='default')
+    db.session.add(t)
+    db.session.commit()
+    return int(t.id)
+
 def active_surveys_query():
-    return Survey.query.filter(Survey.deleted_at.is_(None))
+    q = Survey.query.filter(Survey.deleted_at.is_(None))
+    tid = _current_admin_tenant_id()
+    if current_user.is_authenticated and getattr(current_user, 'is_admin', False):
+        if getattr(current_user, 'is_super_admin', False):
+            return q.filter(Survey.tenant_id == tid)
+        return q.filter(Survey.tenant_id == tid)
+    # 非管理员（公开首页）只展示默认租户的公开问卷（兼容旧行为）
+    return q.filter(Survey.tenant_id == 1)
 
 def trashed_surveys_query():
-    return Survey.query.filter(Survey.deleted_at.isnot(None))
+    q = Survey.query.filter(Survey.deleted_at.isnot(None))
+    tid = _current_admin_tenant_id()
+    return q.filter(Survey.tenant_id == tid)
 
 def survey_is_publicly_available(survey):
     return bool(survey and survey.deleted_at is None and survey.is_active)
@@ -183,6 +237,7 @@ def get_active_survey_or_404(survey_id):
 
 class Question(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     survey_id = db.Column(db.Integer, db.ForeignKey('survey.id'), nullable=False)
     content = db.Column(db.Text, nullable=False)
     option_count = db.Column(db.Integer, nullable=True)  # 单选题的选项数量
@@ -194,6 +249,7 @@ class Question(db.Model):
 
 class TableRespondent(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     survey_id = db.Column(db.Integer, db.ForeignKey('survey.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     created_at = db.Column(db.DateTime, default=get_current_time)
@@ -201,6 +257,7 @@ class TableRespondent(db.Model):
 
 class QRCode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     survey_id = db.Column(db.Integer, db.ForeignKey('survey.id'), nullable=False)
     token = db.Column(db.String(200), unique=True, nullable=False)
     is_used = db.Column(db.Boolean, default=False)
@@ -208,6 +265,7 @@ class QRCode(db.Model):
 
 class Vote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     question_id = db.Column(db.Integer, db.ForeignKey('question.id'), nullable=False)
     table_respondent_id = db.Column(db.Integer, db.ForeignKey('table_respondent.id'), nullable=True)
@@ -217,6 +275,7 @@ class Vote(db.Model):
 
 class SubjectiveAnswer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     survey_id = db.Column(db.Integer, db.ForeignKey('survey.id'), nullable=False)
     content = db.Column(db.Text, nullable=True) # 主观回答内容，可以为空
@@ -251,6 +310,14 @@ def admin_login():
     # 避免匿名扫码投票模式影响管理员界面
     session.pop('hide_nav', None)
     session['is_admin'] = True
+    # 默认管理视角：学校管理员固定为自身 tenant；超管可切换
+    try:
+        if getattr(admin_user, 'is_super_admin', False):
+            session['admin_tenant_id'] = int(admin_user.tenant_id or 1)
+        else:
+            session['admin_tenant_id'] = int(admin_user.tenant_id or 1)
+    except Exception:
+        session['admin_tenant_id'] = 1
     login_user(admin_user, remember=True)
     # 统一回到首页，由 index() 根据管理员会话渲染管理页，避免部分部署对 /admin 路由转发不一致。
     return redirect(url_for('index'))
@@ -259,6 +326,7 @@ def admin_login():
 def admin_logout():
     session.pop('is_admin', None)
     session.pop('hide_nav', None)
+    session.pop('admin_tenant_id', None)
     logout_user()
     return redirect(url_for('index'))
 
@@ -270,6 +338,15 @@ def ensure_admin_session():
         return None
     flash('请先使用管理员账号登录', 'warning')
     return redirect(url_for('index'))
+
+def ensure_super_admin_session():
+    guard = ensure_admin_session()
+    if guard:
+        return guard
+    if not (current_user.is_authenticated and getattr(current_user, 'is_admin', False) and getattr(current_user, 'is_super_admin', False)):
+        flash('需要超级管理员权限', 'danger')
+        return redirect(url_for('admin'))
+    return None
 
 
 @app.route('/admin')
@@ -309,6 +386,77 @@ def admin():
     
     return render_template('admin.html', survey_stats=survey_stats)
 
+
+@app.route('/admin/tenants', methods=['GET', 'POST'])
+@app.route('/admin/tenants/', methods=['GET', 'POST'])
+def admin_tenants():
+    guard = ensure_super_admin_session()
+    if guard:
+        return guard
+
+    _ensure_default_tenant()
+
+    if request.method == 'POST':
+        action = (request.form.get('action') or '').strip()
+        if action == 'create_tenant':
+            name = (request.form.get('tenant_name') or '').strip()
+            slug = _normalize_slug(request.form.get('tenant_slug') or name)
+            if not name:
+                flash('请输入学校/地区名称', 'danger')
+                return redirect(url_for('admin_tenants'))
+            if Tenant.query.filter_by(slug=slug).first():
+                flash('标识（slug）已存在，请换一个', 'danger')
+                return redirect(url_for('admin_tenants'))
+            t = Tenant(name=name, slug=slug)
+            db.session.add(t)
+            db.session.commit()
+            flash(f'已创建学校：{name}', 'success')
+            return redirect(url_for('admin_tenants'))
+        elif action == 'create_admin':
+            tenant_id = int(request.form.get('tenant_id') or '0')
+            username = (request.form.get('admin_username') or '').strip()
+            password = request.form.get('admin_password') or ''
+            if not tenant_id or not Tenant.query.get(tenant_id):
+                flash('无效的学校', 'danger')
+                return redirect(url_for('admin_tenants'))
+            if not username or not password:
+                flash('请输入管理员账号与密码', 'danger')
+                return redirect(url_for('admin_tenants'))
+            if User.query.filter_by(username=username).first():
+                flash('该账号已存在', 'danger')
+                return redirect(url_for('admin_tenants'))
+            u = User(username=username, password_hash=generate_password_hash(password), is_admin=True, is_super_admin=False, tenant_id=tenant_id)
+            db.session.add(u)
+            db.session.commit()
+            flash('已创建学校管理员账号', 'success')
+            return redirect(url_for('admin_tenants'))
+        elif action == 'reset_admin_password':
+            uid = int(request.form.get('user_id') or '0')
+            password = request.form.get('new_password') or ''
+            u = User.query.get(uid)
+            if not u or not u.is_admin or u.is_super_admin:
+                flash('无效的管理员', 'danger')
+                return redirect(url_for('admin_tenants'))
+            if not password:
+                flash('请输入新密码', 'danger')
+                return redirect(url_for('admin_tenants'))
+            u.password_hash = generate_password_hash(password)
+            db.session.commit()
+            flash('密码已重置', 'success')
+            return redirect(url_for('admin_tenants'))
+        elif action == 'switch_tenant':
+            tid = int(request.form.get('tenant_id') or '0')
+            if not Tenant.query.get(tid):
+                flash('无效的学校', 'danger')
+                return redirect(url_for('admin_tenants'))
+            session['admin_tenant_id'] = tid
+            flash('已切换管理视角', 'success')
+            return redirect(url_for('admin'))
+
+    tenants = Tenant.query.order_by(Tenant.id.asc()).all()
+    admins = User.query.filter_by(is_admin=True).order_by(User.id.asc()).all()
+    return render_template('admin_tenants.html', tenants=tenants, admins=admins, current_tenant_id=_current_admin_tenant_id())
+
 @app.route('/admin/create_survey', methods=['POST'])
 def create_survey():
     guard = ensure_admin_session()
@@ -326,7 +474,9 @@ def create_survey():
         return redirect(url_for('admin'))
     
     enable_quick_fill = request.form.get('enable_quick_fill') == 'on'
+    tenant_id = _current_admin_tenant_id()
     survey = Survey(
+        tenant_id=tenant_id,
         name=survey_name, 
         type=survey_type, 
         introduction=survey_introduction, 
@@ -377,6 +527,8 @@ def generate_qr(survey_id):
         return guard
     
     survey = get_active_survey_or_404(survey_id)
+    if survey.tenant_id != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     num_users = int(request.form.get('num_users', 0))
     
     if num_users <= 0:
@@ -387,7 +539,7 @@ def generate_qr(survey_id):
     qr_codes = []
     for _ in range(num_users):
         token = secrets.token_urlsafe(16)
-        qr_code = QRCode(survey_id=survey_id, token=token)
+        qr_code = QRCode(survey_id=survey_id, token=token, tenant_id=survey.tenant_id)
         db.session.add(qr_code)
         qr_codes.append(token)
     
@@ -497,7 +649,10 @@ def login_with_qr(token):
         user = User(
             username=f"user_{token[:8]}",
             password_hash=generate_password_hash(token),
-            qr_code=token
+            qr_code=token,
+            tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
+            is_admin=False,
+            is_super_admin=False
         )
         db.session.add(user)
         db.session.commit()
@@ -515,6 +670,8 @@ def preview_survey(survey_id):
         return guard
     
     survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
     
     # 如果是表格问卷，获取所有受访者
@@ -541,6 +698,9 @@ def preview_survey(survey_id):
 @login_required
 def vote(survey_id):
     survey = get_active_survey_or_404(survey_id)
+    if not getattr(current_user, 'is_admin', False):
+        if getattr(current_user, 'tenant_id', None) is not None and int(current_user.tenant_id or 1) != int(survey.tenant_id or 1):
+            abort(403)
     questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
     
     respondents = []
@@ -572,6 +732,8 @@ def set_option_limits(survey_id):
         return guard
     
     survey = get_active_survey_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     # 根据问卷类型确定可用的选项范围
     if survey.type == 'table':
@@ -643,22 +805,23 @@ def save_vote_to_db(vote_data, retry_count=0):
         question_ids = [q.id for q in session.query(Question).filter_by(survey_id=survey_id).all()]
         session.query(Vote).filter(Vote.user_id == user_id, Vote.question_id.in_(question_ids)).delete(synchronize_session='fetch')
         session.query(SubjectiveAnswer).filter_by(user_id=user_id, survey_id=survey_id).delete(synchronize_session='fetch')
+        tid = int(vote_data.get('tenant_id') or getattr(survey, 'tenant_id', 1) or 1)
         # 插入新投票
         if survey.type == 'single_choice':
             for q_id, score in vote_data['single_choice_votes']:
-                vote = Vote(user_id=user_id, question_id=q_id, score=score)
+                vote = Vote(user_id=user_id, question_id=q_id, score=score, tenant_id=tid)
                 session.add(vote)
         elif survey.type == 'table':
             # 保存自定义单选组件的投票（没有table_respondent_id）
             for q_id, score in vote_data['single_choice_votes']:
-                vote = Vote(user_id=user_id, question_id=q_id, score=score)
+                vote = Vote(user_id=user_id, question_id=q_id, score=score, tenant_id=tid)
                 session.add(vote)
             # 保存标准表格问题的投票（有table_respondent_id）
             for q_id, respondent_id, score in vote_data['table_votes']:
-                vote = Vote(user_id=user_id, question_id=q_id, table_respondent_id=respondent_id, score=score)
+                vote = Vote(user_id=user_id, question_id=q_id, table_respondent_id=respondent_id, score=score, tenant_id=tid)
                 session.add(vote)
         if vote_data.get('subjective_answer'):
-            subjective_answer = SubjectiveAnswer(user_id=user_id, survey_id=survey_id, content=vote_data['subjective_answer'])
+            subjective_answer = SubjectiveAnswer(user_id=user_id, survey_id=survey_id, content=vote_data['subjective_answer'], tenant_id=tid)
             session.add(subjective_answer)
         
         # 提交事务
@@ -685,6 +848,9 @@ def save_vote_to_db(vote_data, retry_count=0):
 @login_required
 def submit_vote(survey_id):
     survey = get_active_survey_or_404(survey_id)
+    if not getattr(current_user, 'is_admin', False):
+        if getattr(current_user, 'tenant_id', None) is not None and int(current_user.tenant_id or 1) != int(survey.tenant_id or 1):
+            abort(403)
     
     # 保存用户的选择到session，以便验证失败时恢复
     saved_choices = {}
@@ -783,6 +949,7 @@ def submit_vote(survey_id):
     vote_data = {
         'survey_id': survey_id,
         'user_id': current_user.id,
+        'tenant_id': int(getattr(survey, 'tenant_id', 1) or 1),
         'single_choice_votes': [],
         'table_votes': [],
         'subjective_answer': None
@@ -835,6 +1002,8 @@ def view_results(survey_id):
         return guard
     
     survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     # 获取投票数据
     votes_data = []
@@ -896,6 +1065,8 @@ def download_results(survey_id):
         return guard
     
     survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     # 创建原始数据
     data = []
@@ -1023,6 +1194,8 @@ def delete_results(survey_id):
         return guard
     
     survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     try:
         # 删除所有投票数据
@@ -1058,10 +1231,13 @@ def copy_survey(survey_id):
         return guard
     
     original_survey = get_active_survey_or_404(survey_id)
+    if int(getattr(original_survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     try:
         # 创建新问卷
         new_survey = Survey(
+            tenant_id=int(getattr(original_survey, 'tenant_id', 1) or 1),
             name=f"{original_survey.name} (副本)",
             type=original_survey.type,
             introduction=original_survey.introduction,
@@ -1077,6 +1253,7 @@ def copy_survey(survey_id):
         original_questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
         for orig_question in original_questions:
             new_question = Question(
+                tenant_id=int(getattr(original_survey, 'tenant_id', 1) or 1),
                 survey_id=new_survey.id,
                 content=orig_question.content,
                 option_count=orig_question.option_count,
@@ -1091,6 +1268,7 @@ def copy_survey(survey_id):
             original_respondents = TableRespondent.query.filter_by(survey_id=survey_id).all()
             for orig_respondent in original_respondents:
                 new_respondent = TableRespondent(
+                    tenant_id=int(getattr(original_survey, 'tenant_id', 1) or 1),
                     survey_id=new_survey.id,
                     name=orig_respondent.name
                 )
@@ -1122,6 +1300,8 @@ def delete_survey(survey_id):
         return guard
 
     survey = get_active_survey_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
 
     try:
         survey.deleted_at = get_current_time()
@@ -1170,6 +1350,8 @@ def restore_survey(survey_id):
         return guard
 
     survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     if survey.deleted_at is None:
         flash('该问卷不在回收站中', 'warning')
         return redirect(url_for('admin'))
@@ -1192,6 +1374,8 @@ def permanent_delete_survey(survey_id):
         return guard
 
     survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     if survey.deleted_at is None:
         flash('请先将问卷移入回收站，再在回收站中永久删除', 'warning')
         return redirect(url_for('admin'))
@@ -1213,6 +1397,8 @@ def edit_survey(survey_id):
     if guard:
         return guard
     survey = get_active_survey_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -1230,6 +1416,7 @@ def edit_survey(survey_id):
                     for idx, content in enumerate(questions_content):
                         question = Question(
                             survey_id=survey.id,
+                            tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
                             content=content,
                             option_count=option_count_batch,
                             component_type='standard',
@@ -1260,6 +1447,7 @@ def edit_survey(survey_id):
                     else:
                         question = Question(
                             survey_id=survey_id,
+                            tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
                             content=content,
                             option_count=len(custom_options),
                             component_type='custom_single_choice',
@@ -1294,6 +1482,7 @@ def edit_survey(survey_id):
                     else:
                         question = Question(
                             survey_id=survey_id,
+                            tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
                             content=content,
                             option_count=len(custom_options),
                             component_type='custom_single_choice',
@@ -1313,6 +1502,7 @@ def edit_survey(survey_id):
                     max_order = db.session.query(db.func.max(Question.order_index)).filter_by(survey_id=survey_id).scalar() or 0
                     question = Question(
                         survey_id=survey_id,
+                            tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
                         content=content,
                         option_count=None,
                         component_type='standard',
@@ -1327,7 +1517,7 @@ def edit_survey(survey_id):
                 # 添加人名
                 name = request.form.get('name')
                 if name:
-                    respondent = TableRespondent(survey_id=survey_id, name=name)
+                    respondent = TableRespondent(survey_id=survey_id, name=name, tenant_id=int(getattr(survey, 'tenant_id', 1) or 1))
                     db.session.add(respondent)
                     db.session.commit()
                     flash('人名添加成功', 'success')
@@ -1339,7 +1529,7 @@ def edit_survey(survey_id):
                 if name_list_text:
                     names = [n.strip() for n in name_list_text.split('\n') if n.strip()]
                     for name in names:
-                        respondent = TableRespondent(survey_id=survey_id, name=name)
+                        respondent = TableRespondent(survey_id=survey_id, name=name, tenant_id=int(getattr(survey, 'tenant_id', 1) or 1))
                         db.session.add(respondent)
                     db.session.commit()
                     flash(f'{len(names)}个人名已成功导入', 'success')
@@ -1360,6 +1550,8 @@ def update_survey_info(survey_id):
     if guard:
         return guard
     survey = get_active_survey_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
     
     survey.name = request.form.get('survey_name', '').strip()
     survey.introduction = request.form.get('survey_introduction', '').strip() or None
@@ -1550,6 +1742,26 @@ def run_db_migrations():
 
     inspector = inspect(db.engine)
 
+    # tenant 表（多学校）
+    try:
+        tables = inspector.get_table_names()
+    except Exception:
+        tables = []
+    if 'tenant' not in tables:
+        logger.info("检测到数据库需要迁移：创建 tenant 表")
+        db.session.execute(text('CREATE TABLE tenant (id INTEGER PRIMARY KEY, name VARCHAR(120) NOT NULL, slug VARCHAR(80) NOT NULL UNIQUE, created_at DATETIME)'))
+        db.session.commit()
+
+    # 默认 tenant
+    try:
+        row = db.session.execute(text("SELECT id FROM tenant ORDER BY id ASC LIMIT 1")).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        logger.info("检测到数据库需要迁移：插入默认 tenant")
+        db.session.execute(text("INSERT INTO tenant (id, name, slug, created_at) VALUES (1, '默认学校', 'default', NULL)"))
+        db.session.commit()
+
     survey_columns = [col['name'] for col in inspector.get_columns('survey')]
     if 'enable_quick_fill' not in survey_columns:
         logger.info("检测到数据库需要迁移：添加 enable_quick_fill 列")
@@ -1563,6 +1775,40 @@ def run_db_migrations():
         db.session.execute(text('ALTER TABLE survey ADD COLUMN deleted_at DATETIME'))
         db.session.commit()
         logger.info("数据库迁移完成：已添加 deleted_at 列")
+
+    survey_columns = [col['name'] for col in inspector.get_columns('survey')]
+    if 'tenant_id' not in survey_columns:
+        logger.info("检测到数据库需要迁移：添加 survey.tenant_id 列")
+        db.session.execute(text('ALTER TABLE survey ADD COLUMN tenant_id INTEGER DEFAULT 1'))
+        db.session.execute(text('UPDATE survey SET tenant_id=1 WHERE tenant_id IS NULL'))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 survey.tenant_id 列")
+
+    user_columns = [col['name'] for col in inspector.get_columns('user')]
+    if 'tenant_id' not in user_columns:
+        logger.info("检测到数据库需要迁移：添加 user.tenant_id 列")
+        db.session.execute(text('ALTER TABLE user ADD COLUMN tenant_id INTEGER'))
+        db.session.execute(text('UPDATE user SET tenant_id=1 WHERE tenant_id IS NULL'))
+        db.session.commit()
+    user_columns = [col['name'] for col in inspector.get_columns('user')]
+    if 'is_super_admin' not in user_columns:
+        logger.info("检测到数据库需要迁移：添加 user.is_super_admin 列")
+        db.session.execute(text('ALTER TABLE user ADD COLUMN is_super_admin INTEGER DEFAULT 0'))
+        # 兼容旧的默认 admin：置为超管
+        db.session.execute(text("UPDATE user SET is_super_admin=1 WHERE username='admin' AND is_admin=1"))
+        db.session.commit()
+
+    # 其他表 tenant_id（便于隔离与查询）
+    for tbl in ('question', 'table_respondent', 'qr_code', 'vote', 'subjective_answer'):
+        try:
+            cols = [col['name'] for col in inspector.get_columns(tbl)]
+        except Exception:
+            continue
+        if 'tenant_id' not in cols:
+            logger.info(f"检测到数据库需要迁移：添加 {tbl}.tenant_id 列")
+            db.session.execute(text(f'ALTER TABLE {tbl} ADD COLUMN tenant_id INTEGER DEFAULT 1'))
+            db.session.execute(text(f'UPDATE {tbl} SET tenant_id=1 WHERE tenant_id IS NULL'))
+            db.session.commit()
 
     question_columns = [col['name'] for col in inspector.get_columns('question')]
     if 'component_type' not in question_columns:

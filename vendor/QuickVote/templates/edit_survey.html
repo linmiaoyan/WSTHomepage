@@ -571,6 +571,7 @@
                 </div>
                 {% endif %}
                 
+                {% if survey.type != 'ranking' %}
                 <div>
                     <label class="form-label">功能设置</label>
                     <div class="form-check mt-2">
@@ -584,6 +585,7 @@
                         </small>
                     </div>
                 </div>
+                {% endif %}
                 
                 <div class="form-grid-full">
                     <button type="submit" class="btn btn-primary">保存基本信息</button>
@@ -818,6 +820,168 @@
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">保存</button>
                     <button type="button" class="btn btn-secondary" onclick="cancelEditQuestion()">取消</button>
+                </div>
+            </form>
+        </div>
+
+    {% elif survey.type == 'ranking' %}
+        <div class="section-card">
+            <div class="section-header" onclick="toggleSectionCard(this)">
+                <div class="section-header-title">
+                    <span class="section-icon">📝</span>
+                    <span>批量添加排序题</span>
+                </div>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <form action="{{ url_for('edit_survey', survey_id=survey.id) }}" method="post">
+                    <input type="hidden" name="action" value="import_list">
+                    <div class="mb-3">
+                        <label for="ranking_question_list" class="form-label">问题列表（每行一个排序题）</label>
+                        <textarea class="form-control" id="ranking_question_list" name="question_list"
+                                  rows="10" placeholder="每行输入一个问题，例如：&#10;请问您为什么选择该类饮品？"></textarea>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label for="ranking_option_count_batch" class="form-label">选项数量</label>
+                            <select class="form-select" id="ranking_option_count_batch" name="option_count_batch">
+                                {% for n in range(2, 11) %}
+                                <option value="{{ n }}" {% if n == 10 %}selected{% endif %}>{{ n }} 个选项 (A-{{ 'ABCDEFGHIJ'[n-1] }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="rank_min_batch" class="form-label">最少选择</label>
+                            <input type="number" class="form-control" id="rank_min_batch" name="rank_min_batch" min="1" max="10" value="1">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="rank_max_batch" class="form-label">最多选择</label>
+                            <input type="number" class="form-control" id="rank_max_batch" name="rank_max_batch" min="1" max="10" value="4">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-success">批量添加</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="section-card always-visible">
+            <div class="section-header">
+                <div class="section-header-title">
+                    <span class="section-icon">📋</span>
+                    <span>排序题列表</span>
+                </div>
+            </div>
+            <div class="section-content show">
+                <div class="alert alert-info mb-3" style="font-size: 0.9rem;">
+                    受访者需从各题选项中选择指定数量并排序。统计时使用<strong>平均综合得分</strong>：某用户选 N 项时，第 i 名权重为 N−i+1，选项得分 = Σ(频次×权重) / 作答人数。
+                </div>
+                <div class="question-list-container">
+                    {% if questions %}
+                    <form id="batchDeleteForm" action="{{ url_for('batch_delete_questions') }}" method="post">
+                        <input type="hidden" name="survey_id" value="{{ survey.id }}">
+                        <div class="batch-actions">
+                            <div class="batch-actions-left">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleSelectAll()">全选/取消全选</button>
+                                <button type="submit" class="btn btn-sm btn-danger"
+                                        onclick="return confirm('确定要删除选中的问题吗？此操作不可撤销！');">
+                                    批量删除选中
+                                </button>
+                            </div>
+                            <div class="batch-actions-right" id="selected-count">已选择 0 个问题</div>
+                        </div>
+                        <div class="list-group" id="question-list">
+                            {% for question in questions %}
+                            <div class="list-group-item question-item-clickable"
+                                 data-question-id="{{ question.id }}"
+                                 onclick="toggleQuestionCheckbox(this, {{ question.id }}, event)">
+                                <input type="checkbox" class="form-check-input mt-2 question-checkbox"
+                                       name="question_ids" value="{{ question.id }}"
+                                       onchange="updateSelectedCount()"
+                                       onclick="event.stopPropagation()">
+                                <div class="question-content">
+                                    <h6>{{ question.content }}</h6>
+                                    <span class="badge bg-secondary mb-2">排序题</span>
+                                    <div class="question-meta">
+                                        <span class="question-info">
+                                            选项: {{ 'ABCDEFGHIJ'[:(question.option_count or 4)] }}，
+                                            选择 {{ question.rank_min or 1 }}-{{ question.rank_max or 4 }} 项并排序
+                                        </span>
+                                        <div class="question-actions" onclick="event.stopPropagation()">
+                                            <div class="btn-group btn-group-sm me-2">
+                                                {% if not loop.first %}
+                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                        onclick="moveQuestion({{ question.id }}, 'top', {{ survey.id }})"
+                                                        title="置顶">⇈</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                        onclick="moveQuestion({{ question.id }}, 'up', {{ survey.id }})"
+                                                        title="上移">↑</button>
+                                                {% endif %}
+                                                {% if not loop.last %}
+                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                        onclick="moveQuestion({{ question.id }}, 'down', {{ survey.id }})"
+                                                        title="下移">↓</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                        onclick="moveQuestion({{ question.id }}, 'bottom', {{ survey.id }})"
+                                                        title="置底">⇊</button>
+                                                {% endif %}
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-primary"
+                                                    data-question-id="{{ question.id }}"
+                                                    data-question-content='{{ question.content|tojson }}'
+                                                    data-option-count="{{ question.option_count }}"
+                                                    data-rank-min="{{ question.rank_min or 1 }}"
+                                                    data-rank-max="{{ question.rank_max or 4 }}"
+                                                    onclick="editRankingQuestion(this)">
+                                                编辑
+                                            </button>
+                                            <form action="{{ url_for('delete_question', question_id=question.id) }}" method="post"
+                                                  onsubmit="return confirm('确定要删除这个问题吗？');" style="display:inline;">
+                                                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </form>
+                    {% else %}
+                    <div class="empty-state">
+                        <p>暂无排序题，请批量添加</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card" id="editRankingQuestionCard" style="display: none;">
+            <div class="section-header">编辑排序题</div>
+            <form id="editRankingQuestionForm" method="post">
+                <div class="mb-3">
+                    <label for="edit_ranking_question_content" class="form-label">问题内容</label>
+                    <textarea class="form-control" id="edit_ranking_question_content" name="content" rows="2" required></textarea>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label for="edit_ranking_option_count" class="form-label">选项数量</label>
+                        <select class="form-select" id="edit_ranking_option_count" name="option_count">
+                            {% for n in range(2, 11) %}
+                            <option value="{{ n }}">{{ n }} 个选项</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="edit_rank_min" class="form-label">最少选择</label>
+                        <input type="number" class="form-control" id="edit_rank_min" name="rank_min" min="1" max="10" value="1">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="edit_rank_max" class="form-label">最多选择</label>
+                        <input type="number" class="form-control" id="edit_rank_max" name="rank_max" min="1" max="10" value="4">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" onclick="cancelEditRankingQuestion()">取消</button>
                 </div>
             </form>
         </div>
@@ -1109,6 +1273,28 @@
     // 取消编辑问题
     function cancelEditQuestion() {
         document.getElementById('editQuestionCard').style.display = 'none';
+    }
+
+    function editRankingQuestion(button) {
+        try {
+            const questionId = button.getAttribute('data-question-id');
+            const content = JSON.parse(button.getAttribute('data-question-content'));
+            document.getElementById('edit_ranking_question_content').value = content;
+            document.getElementById('edit_ranking_option_count').value = button.getAttribute('data-option-count') || '10';
+            document.getElementById('edit_rank_min').value = button.getAttribute('data-rank-min') || '1';
+            document.getElementById('edit_rank_max').value = button.getAttribute('data-rank-max') || '4';
+            document.getElementById('editRankingQuestionForm').action = "{{ url_for('update_question', question_id=0) }}".replace('0', questionId);
+            const editCard = document.getElementById('editRankingQuestionCard');
+            editCard.style.display = 'block';
+            editCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (e) {
+            console.error('编辑排序题时出错:', e);
+            alert('编辑排序题时出错，请刷新页面后重试');
+        }
+    }
+
+    function cancelEditRankingQuestion() {
+        document.getElementById('editRankingQuestionCard').style.display = 'none';
     }
 
     // 编辑表格问题

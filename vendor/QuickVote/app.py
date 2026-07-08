@@ -169,7 +169,7 @@ class Survey(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
     name = db.Column(db.String(200), nullable=False)
-    type = db.Column(db.String(20), nullable=False)  # 'single_choice' 或 'table'
+    type = db.Column(db.String(20), nullable=False)  # 'single_choice'、'table' 或 'ranking'
     introduction = db.Column(db.Text, nullable=True)  # 保留：问卷简介
     subjective_question_prompt = db.Column(db.Text, nullable=True) # 新增：主观题说明文字
     created_at = db.Column(db.DateTime, default=get_current_time)
@@ -235,6 +235,78 @@ def get_active_survey_or_404(survey_id):
         abort(404)
     return survey
 
+SURVEY_TYPE_LABELS = {
+    'single_choice': '单选',
+    'table': '表格',
+    'ranking': '排序',
+}
+
+def survey_type_label(survey_type):
+    return SURVEY_TYPE_LABELS.get(survey_type, survey_type)
+
+def _question_option_keys(question):
+    if question.custom_options:
+        return list(question.custom_options.keys())
+    count = question.option_count or 4
+    return list('ABCDEFGHIJ'[:count])
+
+def compute_ranking_weighted_scores(survey_id):
+    """计算排序题各选项的平均综合得分（权重 = 该用户所选 N 项时第 i 名的 N-i+1）。"""
+    questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
+    results = []
+    for question in questions:
+        votes = Vote.query.filter_by(question_id=question.id).filter(Vote.option_key.isnot(None)).all()
+        user_selections = {}
+        for vote in votes:
+            try:
+                rank = int(vote.score)
+            except (TypeError, ValueError):
+                continue
+            user_selections.setdefault(vote.user_id, {})[vote.option_key] = rank
+
+        total_respondents = len(user_selections)
+        option_stats = []
+        for opt in _question_option_keys(question):
+            weighted_sum = 0
+            freq_by_rank = {}
+            for ranks in user_selections.values():
+                if opt not in ranks:
+                    continue
+                rank = ranks[opt]
+                n = len(ranks)
+                weight = n - rank + 1
+                weighted_sum += weight
+                freq_by_rank[rank] = freq_by_rank.get(rank, 0) + 1
+            avg_score = round(weighted_sum / total_respondents, 2) if total_respondents > 0 else 0
+            label = (question.custom_options or {}).get(opt, opt)
+            option_stats.append({
+                'option': opt,
+                'label': label,
+                'avg_score': avg_score,
+                'freq_by_rank': freq_by_rank,
+            })
+        results.append({
+            'question': question,
+            'total_respondents': total_respondents,
+            'option_stats': option_stats,
+        })
+    return results
+
+def _count_survey_votes(survey):
+    if survey.type == 'single_choice':
+        return Vote.query.join(Question).filter(Question.survey_id == survey.id).count()
+    if survey.type == 'table':
+        return Vote.query.join(Question).join(TableRespondent).filter(
+            Question.survey_id == survey.id,
+            TableRespondent.survey_id == survey.id
+        ).count()
+    if survey.type == 'ranking':
+        return Vote.query.join(Question).filter(
+            Question.survey_id == survey.id,
+            Vote.option_key.isnot(None)
+        ).count()
+    return 0
+
 class Question(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenant.id'), nullable=False, index=True, default=1)
@@ -243,6 +315,8 @@ class Question(db.Model):
     option_count = db.Column(db.Integer, nullable=True)  # 单选题的选项数量
     component_type = db.Column(db.String(50), default='standard')  # 'standard' 或 'custom_single_choice'
     custom_options = db.Column(db.JSON, nullable=True)  # 自定义选项内容，格式: {"A": "党员", "B": "群众"}
+    rank_min = db.Column(db.Integer, default=1)  # 排序题：最少选择项数
+    rank_max = db.Column(db.Integer, default=4)  # 排序题：最多选择项数
     order_index = db.Column(db.Integer, default=0)  # 排序索引
     created_at = db.Column(db.DateTime, default=get_current_time)
     votes = db.relationship('Vote', backref='question', lazy=True)
@@ -269,7 +343,8 @@ class Vote(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     question_id = db.Column(db.Integer, db.ForeignKey('question.id'), nullable=False)
     table_respondent_id = db.Column(db.Integer, db.ForeignKey('table_respondent.id'), nullable=True)
-    score = db.Column(db.Text, nullable=False)  # 改为Text以支持长文本回答
+    score = db.Column(db.Text, nullable=False)  # 单选/表格为选项字母；排序题为名次(1-based)
+    option_key = db.Column(db.String(10), nullable=True)  # 排序题：选项字母 A/B/C...
     created_at = db.Column(db.DateTime, default=get_current_time)
     table_respondent = db.relationship('TableRespondent', backref='votes', lazy=True)
 
@@ -360,16 +435,7 @@ def admin():
     # 计算每个问卷的数据条数
     survey_stats = []
     for survey in surveys:
-        # 计算投票数据条数
-        if survey.type == 'single_choice':
-            vote_count = Vote.query.join(Question).filter(Question.survey_id == survey.id).count()
-        elif survey.type == 'table':
-            vote_count = Vote.query.join(Question).join(TableRespondent).filter(
-                Question.survey_id == survey.id,
-                TableRespondent.survey_id == survey.id
-            ).count()
-        else:
-            vote_count = 0
+        vote_count = _count_survey_votes(survey)
         
         # 计算主观题回答数
         subjective_count = SubjectiveAnswer.query.filter_by(survey_id=survey.id).count()
@@ -820,6 +886,16 @@ def save_vote_to_db(vote_data, retry_count=0):
             for q_id, respondent_id, score in vote_data['table_votes']:
                 vote = Vote(user_id=user_id, question_id=q_id, table_respondent_id=respondent_id, score=score, tenant_id=tid)
                 session.add(vote)
+        elif survey.type == 'ranking':
+            for q_id, option_key, rank in vote_data.get('ranking_votes', []):
+                vote = Vote(
+                    user_id=user_id,
+                    question_id=q_id,
+                    score=str(rank),
+                    option_key=option_key,
+                    tenant_id=tid
+                )
+                session.add(vote)
         if vote_data.get('subjective_answer'):
             subjective_answer = SubjectiveAnswer(user_id=user_id, survey_id=survey_id, content=vote_data['subjective_answer'], tenant_id=tid)
             session.add(subjective_answer)
@@ -869,6 +945,12 @@ def submit_vote(survey_id):
         for key, score in request.form.items():
             if key.startswith('vote_'):
                 saved_choices[key] = score
+        if 'subjective_answer' in request.form:
+            saved_choices['subjective_answer'] = request.form.get('subjective_answer', '')
+    elif survey.type == 'ranking':
+        for key, val in request.form.items():
+            if key.startswith('rank_'):
+                saved_choices[key] = val
         if 'subjective_answer' in request.form:
             saved_choices['subjective_answer'] = request.form.get('subjective_answer', '')
     
@@ -944,6 +1026,34 @@ def submit_vote(survey_id):
                 if option_counts.get(option, 0) > limit:
                     flash(f'选项 {option} 的选择次数超过了限制 ({limit}次)', 'danger')
                     return redirect(url_for('vote', survey_id=survey_id))
+    elif survey.type == 'ranking':
+        questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
+        for question in questions:
+            rank_min = question.rank_min if question.rank_min is not None else 1
+            rank_max = question.rank_max if question.rank_max is not None else 4
+            prefix = f'rank_{question.id}_'
+            selections = {}
+            for key, val in request.form.items():
+                if key.startswith(prefix) and val:
+                    opt = key[len(prefix):]
+                    try:
+                        selections[opt] = int(val)
+                    except ValueError:
+                        flash('排序名次无效，请重新选择', 'danger')
+                        return redirect(url_for('vote', survey_id=survey_id))
+            count = len(selections)
+            if count < rank_min or count > rank_max:
+                flash(f'「{question.content}」请选择 {rank_min}-{rank_max} 项并完成排序', 'danger')
+                return redirect(url_for('vote', survey_id=survey_id))
+            expected = list(range(1, count + 1))
+            if sorted(selections.values()) != expected:
+                flash(f'「{question.content}」排序名次必须连续且不重复（1 至 {count}）', 'danger')
+                return redirect(url_for('vote', survey_id=survey_id))
+            valid_keys = set(_question_option_keys(question))
+            for opt in selections:
+                if opt not in valid_keys:
+                    flash('提交了无效的排序选项', 'danger')
+                    return redirect(url_for('vote', survey_id=survey_id))
     
     # 打包投票数据
     vote_data = {
@@ -952,6 +1062,7 @@ def submit_vote(survey_id):
         'tenant_id': int(getattr(survey, 'tenant_id', 1) or 1),
         'single_choice_votes': [],
         'table_votes': [],
+        'ranking_votes': [],
         'subjective_answer': None
     }
     
@@ -974,6 +1085,14 @@ def submit_vote(survey_id):
                 q_id = int(parts[1])
                 respondent_id = int(parts[2])
                 vote_data['table_votes'].append((q_id, respondent_id, score))
+    elif survey.type == 'ranking':
+        questions = Question.query.filter_by(survey_id=survey_id).all()
+        for question in questions:
+            prefix = f'rank_{question.id}_'
+            for key, val in request.form.items():
+                if key.startswith(prefix) and val:
+                    opt = key[len(prefix):]
+                    vote_data['ranking_votes'].append((question.id, opt, int(val)))
     
     if survey.subjective_question_prompt:
         subjective_answer_content = request.form.get('subjective_answer', '').strip()
@@ -1030,6 +1149,22 @@ def view_results(survey_id):
                 'option': vote.score,
                 'time': vote.created_at
             })
+    elif survey.type == 'ranking':
+        votes = Vote.query.join(Question).filter(
+            Question.survey_id == survey_id,
+            Vote.option_key.isnot(None)
+        ).order_by(Vote.created_at.desc()).all()
+        for vote in votes:
+            label = vote.option_key
+            if vote.question.custom_options and vote.option_key in vote.question.custom_options:
+                label = f"{vote.option_key}. {vote.question.custom_options[vote.option_key]}"
+            votes_data.append({
+                'user': vote.user.username,
+                'question': vote.question.content,
+                'option': label,
+                'rank': vote.score,
+                'time': vote.created_at
+            })
     
     # 获取主观题回答
     subjective_answers = SubjectiveAnswer.query.filter_by(survey_id=survey_id).order_by(SubjectiveAnswer.created_at.desc()).all()
@@ -1047,6 +1182,7 @@ def view_results(survey_id):
     unique_respondents = len(set(v.get('respondent') for v in votes_data if v.get('respondent'))) if survey.type == 'table' else 0
     total_questions = len(survey.questions)
     total_subjective_answers = len(subjective_data)
+    ranking_scores = compute_ranking_weighted_scores(survey_id) if survey.type == 'ranking' else []
     
     return render_template('view_results.html', 
                          survey=survey,
@@ -1056,7 +1192,8 @@ def view_results(survey_id):
                          unique_users=unique_users,
                          unique_respondents=unique_respondents,
                          total_questions=total_questions,
-                         total_subjective_answers=total_subjective_answers)
+                         total_subjective_answers=total_subjective_answers,
+                         ranking_scores=ranking_scores)
 
 @app.route('/admin/download_results/<int:survey_id>')
 def download_results(survey_id):
@@ -1093,6 +1230,22 @@ def download_results(survey_id):
                 '选项': vote.score,
                 '时间': vote.created_at
             })
+    elif survey.type == 'ranking':
+        votes = Vote.query.join(Question).filter(
+            Question.survey_id == survey_id,
+            Vote.option_key.isnot(None)
+        ).all()
+        for vote in votes:
+            label = vote.option_key
+            if vote.question.custom_options and vote.option_key in vote.question.custom_options:
+                label = f"{vote.option_key}.{vote.question.custom_options[vote.option_key]}"
+            data.append({
+                '用户': vote.user.username,
+                '问题': vote.question.content.replace(' ', '-'),
+                '选项': label,
+                '名次': int(vote.score),
+                '时间': vote.created_at
+            })
     
     # 包含主观题回答
     subjective_answers = SubjectiveAnswer.query.filter_by(survey_id=survey_id).all()
@@ -1110,6 +1263,8 @@ def download_results(survey_id):
     columns = ['用户', '问题', '选项', '时间']
     if survey.type == 'table':
         columns.insert(2, '人名') # 在'问题'和'选项'之间插入'人名'
+    elif survey.type == 'ranking':
+        columns.insert(3, '名次')  # 在'选项'和'时间'之间插入'名次'
 
     # 创建DataFrame
     df = pd.DataFrame(data, columns=columns)
@@ -1177,6 +1332,36 @@ def download_results(survey_id):
             
             stats_df = pd.DataFrame(stats_data)
             stats_df.to_excel(writer, sheet_name='统计结果', index=False)
+            
+        elif survey.type == 'ranking':
+            sort_cols = []
+            if '问题' in df.columns:
+                sort_cols.append('问题')
+            if '选项' in df.columns:
+                sort_cols.append('选项')
+            if '名次' in df.columns:
+                sort_cols.append('名次')
+            df_sorted = df.sort_values(sort_cols) if sort_cols else df
+            df_sorted.to_excel(writer, sheet_name='按问题排列', index=False)
+
+            ranking_scores = compute_ranking_weighted_scores(survey_id)
+            weighted_rows = []
+            for block in ranking_scores:
+                q = block['question']
+                qname = q.content.replace(' ', '-')
+                for stat in block['option_stats']:
+                    row = {
+                        '问题': qname,
+                        '选项': stat['label'],
+                        '平均综合得分': stat['avg_score'],
+                        '作答人数': block['total_respondents'],
+                    }
+                    for rank, freq in sorted(stat['freq_by_rank'].items()):
+                        row[f'第{rank}名人数'] = freq
+                    weighted_rows.append(row)
+            if weighted_rows:
+                weighted_df = pd.DataFrame(weighted_rows)
+                weighted_df.to_excel(writer, sheet_name='加权统计', index=False)
     
     output.seek(0)
     
@@ -1206,6 +1391,13 @@ def delete_results(survey_id):
                 Question.survey_id == survey_id,
                 TableRespondent.survey_id == survey_id
             ).all()
+        elif survey.type == 'ranking':
+            votes = Vote.query.join(Question).filter(
+                Question.survey_id == survey_id,
+                Vote.option_key.isnot(None)
+            ).all()
+        else:
+            votes = []
         
         for vote in votes:
             db.session.delete(vote)
@@ -1259,6 +1451,8 @@ def copy_survey(survey_id):
                 option_count=orig_question.option_count,
                 component_type=orig_question.component_type,
                 custom_options=orig_question.custom_options.copy() if orig_question.custom_options else None,
+                rank_min=orig_question.rank_min,
+                rank_max=orig_question.rank_max,
                 order_index=orig_question.order_index
             )
             db.session.add(new_question)
@@ -1324,15 +1518,7 @@ def admin_trash():
     trashed = trashed_surveys_query().order_by(Survey.deleted_at.desc()).all()
     survey_stats = []
     for survey in trashed:
-        if survey.type == 'single_choice':
-            vote_count = Vote.query.join(Question).filter(Question.survey_id == survey.id).count()
-        elif survey.type == 'table':
-            vote_count = Vote.query.join(Question).join(TableRespondent).filter(
-                Question.survey_id == survey.id,
-                TableRespondent.survey_id == survey.id
-            ).count()
-        else:
-            vote_count = 0
+        vote_count = _count_survey_votes(survey)
         subjective_count = SubjectiveAnswer.query.filter_by(survey_id=survey.id).count()
         survey_stats.append({
             'survey': survey,
@@ -1535,6 +1721,35 @@ def edit_survey(survey_id):
                     flash(f'{len(names)}个人名已成功导入', 'success')
                 else:
                     flash('导入列表不能为空', 'danger')
+
+        elif survey.type == 'ranking':
+            if action == 'import_list':
+                question_list_text = request.form.get('question_list')
+                option_count_batch = int(request.form.get('option_count_batch', 10))
+                rank_min_batch = int(request.form.get('rank_min_batch', 1))
+                rank_max_batch = int(request.form.get('rank_max_batch', 4))
+                if rank_min_batch < 1 or rank_max_batch < rank_min_batch:
+                    flash('排序题最少/最多选择数量无效', 'danger')
+                    return redirect(url_for('edit_survey', survey_id=survey_id))
+                if question_list_text:
+                    max_order = db.session.query(db.func.max(Question.order_index)).filter_by(survey_id=survey_id).scalar() or 0
+                    questions_content = [q.strip() for q in question_list_text.split('\n') if q.strip()]
+                    for idx, content in enumerate(questions_content):
+                        question = Question(
+                            survey_id=survey.id,
+                            tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
+                            content=content,
+                            option_count=min(max(option_count_batch, 2), 10),
+                            component_type='standard',
+                            rank_min=rank_min_batch,
+                            rank_max=rank_max_batch,
+                            order_index=max_order + idx + 1
+                        )
+                        db.session.add(question)
+                    db.session.commit()
+                    flash(f'{len(questions_content)} 个排序题已成功导入', 'success')
+                else:
+                    flash('导入列表不能为空', 'danger')
         
         return redirect(url_for('edit_survey', survey_id=survey_id))
     
@@ -1585,10 +1800,20 @@ def update_question(question_id):
     
     question.content = content
     
-    # 如果是单选题，更新选项数量
+    # 如果是单选题或排序题，更新选项数量
     if survey.type == 'single_choice':
         option_count = int(request.form.get('option_count', 4))
         question.option_count = option_count
+    elif survey.type == 'ranking':
+        option_count = int(request.form.get('option_count', 10))
+        question.option_count = min(max(option_count, 2), 10)
+        rank_min = int(request.form.get('rank_min', 1))
+        rank_max = int(request.form.get('rank_max', 4))
+        if rank_min < 1 or rank_max < rank_min:
+            flash('最少/最多选择数量无效', 'danger')
+            return redirect(url_for('edit_survey', survey_id=survey.id))
+        question.rank_min = rank_min
+        question.rank_max = rank_max
     
     db.session.commit()
     flash('问题已更新', 'success')
@@ -1830,6 +2055,24 @@ def run_db_migrations():
         db.session.execute(text('ALTER TABLE question ADD COLUMN order_index INTEGER DEFAULT 0'))
         db.session.commit()
         logger.info("数据库迁移完成：已添加 order_index 列")
+
+    question_columns = [col['name'] for col in inspector.get_columns('question')]
+    if 'rank_min' not in question_columns:
+        logger.info("检测到数据库需要迁移：添加 rank_min 列")
+        db.session.execute(text('ALTER TABLE question ADD COLUMN rank_min INTEGER DEFAULT 1'))
+        db.session.commit()
+    question_columns = [col['name'] for col in inspector.get_columns('question')]
+    if 'rank_max' not in question_columns:
+        logger.info("检测到数据库需要迁移：添加 rank_max 列")
+        db.session.execute(text('ALTER TABLE question ADD COLUMN rank_max INTEGER DEFAULT 4'))
+        db.session.commit()
+
+    vote_columns = [col['name'] for col in inspector.get_columns('vote')]
+    if 'option_key' not in vote_columns:
+        logger.info("检测到数据库需要迁移：添加 vote.option_key 列")
+        db.session.execute(text('ALTER TABLE vote ADD COLUMN option_key VARCHAR(10)'))
+        db.session.commit()
+        logger.info("数据库迁移完成：已添加 vote.option_key 列")
 
 
 @app.before_request

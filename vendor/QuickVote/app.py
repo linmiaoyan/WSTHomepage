@@ -311,7 +311,27 @@ def compute_ranking_weighted_scores(survey_id):
         })
     return results
 
+def _count_survey_submissions(survey):
+    """统计问卷提交人次（独立作答用户数），而非原始投票条数。"""
+    question_ids = [
+        row[0] for row in Question.query.filter_by(survey_id=survey.id).with_entities(Question.id).all()
+    ]
+    user_ids = set()
+    if question_ids:
+        user_ids.update(
+            uid for (uid,) in db.session.query(Vote.user_id).filter(
+                Vote.question_id.in_(question_ids)
+            ).distinct()
+        )
+    user_ids.update(
+        uid for (uid,) in db.session.query(SubjectiveAnswer.user_id).filter_by(
+            survey_id=survey.id
+        ).distinct()
+    )
+    return len(user_ids)
+
 def _count_survey_votes(survey):
+    """原始投票条数（含排序题多行、表格多格等），用于结果页明细统计。"""
     if survey.type == 'single_choice':
         return Vote.query.join(Question).filter(Question.survey_id == survey.id).count()
     if survey.type == 'table':
@@ -451,22 +471,17 @@ def admin():
         return guard
     surveys = active_surveys_query().filter_by(is_active=True).all()
     
-    # 计算每个问卷的数据条数
+    # 计算每个问卷的提交人次
     survey_stats = []
     for survey in surveys:
-        vote_count = _count_survey_votes(survey)
-        
-        # 计算主观题回答数
+        submission_count = _count_survey_submissions(survey)
         subjective_count = SubjectiveAnswer.query.filter_by(survey_id=survey.id).count()
-        
-        # 总数据条数
-        total_count = vote_count + subjective_count
         
         survey_stats.append({
             'survey': survey,
-            'vote_count': vote_count,
+            'submission_count': submission_count,
             'subjective_count': subjective_count,
-            'total_count': total_count
+            'total_count': submission_count,
         })
     
     return render_template('admin.html', survey_stats=survey_stats)
@@ -1534,13 +1549,13 @@ def admin_trash():
     trashed = trashed_surveys_query().order_by(Survey.deleted_at.desc()).all()
     survey_stats = []
     for survey in trashed:
-        vote_count = _count_survey_votes(survey)
+        submission_count = _count_survey_submissions(survey)
         subjective_count = SubjectiveAnswer.query.filter_by(survey_id=survey.id).count()
         survey_stats.append({
             'survey': survey,
-            'vote_count': vote_count,
+            'submission_count': submission_count,
             'subjective_count': subjective_count,
-            'total_count': vote_count + subjective_count,
+            'total_count': submission_count,
         })
 
     return render_template('trash.html', survey_stats=survey_stats)

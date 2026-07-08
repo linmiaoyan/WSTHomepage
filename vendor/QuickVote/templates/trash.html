@@ -100,7 +100,7 @@
                     <div class="survey-meta">
                         <span class="badge bg-secondary">{% if survey.type == 'single_choice' %}单选{% elif survey.type == 'table' %}表格{% elif survey.type == 'ranking' %}排序{% else %}{{ survey.type }}{% endif %}</span>
                         <div class="mt-2">
-                            已收集 <strong>{{ stat.total_count }}</strong> 条数据
+                            已收集 <strong>{{ stat.total_count }}</strong> 人次
                         </div>
                         {% if survey.deleted_at %}
                         <div class="mt-1">删除时间：{{ survey.deleted_at.strftime('%Y-%m-%d %H:%M') }}</div>

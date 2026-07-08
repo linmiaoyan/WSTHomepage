@@ -96,10 +96,19 @@
         border-bottom: none;
     }
     .ranking-item.ranked {
-        cursor: default;
+        cursor: grab;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    .ranking-item.ranked.dragging {
+        cursor: grabbing;
+        opacity: 0.65;
+        background: #ebf8ff;
     }
     .ranking-item.pool-item {
         cursor: pointer;
+        touch-action: manipulation;
     }
     .ranking-item.pool-item:hover {
         background: #f7fafc;
@@ -133,15 +142,16 @@
     }
     .rank-drag-handle {
         display: none;
-        width: 1.5rem;
+        width: 1.25rem;
         text-align: center;
         color: #a0aec0;
-        cursor: grab;
-        font-size: 1.1rem;
+        cursor: inherit;
+        font-size: 1rem;
         line-height: 1;
-        letter-spacing: -2px;
+        letter-spacing: -1px;
         user-select: none;
         flex-shrink: 0;
+        pointer-events: none;
     }
     .ranking-item.ranked .rank-drag-handle {
         display: block;
@@ -1027,7 +1037,6 @@ document.addEventListener('DOMContentLoaded', function() {
         rankedZone(card).appendChild(item);
         item.classList.add('ranked');
         item.classList.remove('pool-item');
-        item.setAttribute('draggable', 'true');
         renumberRanked(card);
         card.classList.remove('ranking-invalid');
         const alertEl = document.getElementById('missing_' + card.getAttribute('data-question-id'));
@@ -1040,7 +1049,6 @@ document.addEventListener('DOMContentLoaded', function() {
         item.classList.add('pool-item');
         badge(item).textContent = '';
         hiddenInput(item).value = '';
-        item.removeAttribute('draggable');
         poolZone(card).appendChild(item);
         renumberRanked(card);
     }
@@ -1057,7 +1065,6 @@ document.addEventListener('DOMContentLoaded', function() {
             ranked.appendChild(x.item);
             x.item.classList.add('ranked');
             x.item.classList.remove('pool-item');
-            x.item.setAttribute('draggable', 'true');
         });
         items.filter(function(i) { return !i.classList.contains('ranked'); }).forEach(function(i) {
             pool.appendChild(i);
@@ -1065,51 +1072,88 @@ document.addEventListener('DOMContentLoaded', function() {
         renumberRanked(card);
     }
 
-    function setupDrag(card) {
+    function setupRankedReorder(card) {
         const zone = rankedZone(card);
-        let dragEl = null;
+        if (!zone) return;
 
-        zone.addEventListener('dragstart', function(e) {
+        let dragging = null;
+        let startY = 0;
+        let startX = 0;
+        let didDrag = false;
+        const MOVE_THRESHOLD = 5;
+
+        function clearDragVisuals() {
+            zone.querySelectorAll('.ranking-item').forEach(function(el) {
+                el.classList.remove('dragging', 'drag-over-top');
+            });
+        }
+
+        function insertionTarget(clientY, exclude) {
+            const items = rankedItems(card).filter(function(el) { return el !== exclude; });
+            for (let i = 0; i < items.length; i++) {
+                const rect = items[i].getBoundingClientRect();
+                if (clientY < rect.top + rect.height / 2) {
+                    return items[i];
+                }
+            }
+            return null;
+        }
+
+        function moveDraggingTo(clientY) {
+            if (!dragging) return;
+            const before = insertionTarget(clientY, dragging);
+            if (before) {
+                if (dragging !== before && dragging.nextSibling !== before) {
+                    zone.insertBefore(dragging, before);
+                }
+            } else if (dragging !== zone.lastElementChild) {
+                zone.appendChild(dragging);
+            }
+            renumberRanked(card);
+        }
+
+        zone.addEventListener('pointerdown', function(e) {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
             const item = e.target.closest('.ranking-item.ranked');
-            if (!item || !e.target.closest('.rank-drag-handle')) {
-                e.preventDefault();
+            if (!item || e.target.closest('.rank-badge')) return;
+            dragging = item;
+            startY = e.clientY;
+            startX = e.clientX;
+            didDrag = false;
+            item.classList.add('dragging');
+            if (item.setPointerCapture) {
+                try { item.setPointerCapture(e.pointerId); } catch (err) {}
+            }
+        });
+
+        zone.addEventListener('pointermove', function(e) {
+            if (!dragging) return;
+            if (Math.abs(e.clientY - startY) < MOVE_THRESHOLD && Math.abs(e.clientX - startX) < MOVE_THRESHOLD) {
                 return;
             }
-            dragEl = item;
-            item.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-            try { e.dataTransfer.setData('text/plain', item.getAttribute('data-option') || ''); } catch (err) {}
-        });
-
-        zone.addEventListener('dragend', function() {
-            if (dragEl) dragEl.classList.remove('dragging');
-            zone.querySelectorAll('.ranking-item').forEach(function(el) { el.classList.remove('drag-over-top'); });
-            dragEl = null;
-            renumberRanked(card);
-        });
-
-        zone.addEventListener('dragover', function(e) {
-            if (!dragEl) return;
+            didDrag = true;
             e.preventDefault();
-            const target = e.target.closest('.ranking-item.ranked');
-            zone.querySelectorAll('.ranking-item').forEach(function(el) { el.classList.remove('drag-over-top'); });
-            if (target && target !== dragEl) {
-                target.classList.add('drag-over-top');
-                const rect = target.getBoundingClientRect();
-                const before = (e.clientY - rect.top) < rect.height / 2;
-                zone.insertBefore(dragEl, before ? target : target.nextSibling);
+            moveDraggingTo(e.clientY);
+        });
+
+        function finishDrag(e) {
+            if (!dragging) return;
+            if (dragging.releasePointerCapture && e && e.pointerId !== undefined) {
+                try { dragging.releasePointerCapture(e.pointerId); } catch (err) {}
             }
-        });
-
-        zone.addEventListener('drop', function(e) {
-            e.preventDefault();
+            dragging.dataset.didDrag = didDrag ? '1' : '';
+            clearDragVisuals();
+            dragging = null;
             renumberRanked(card);
-        });
+        }
+
+        zone.addEventListener('pointerup', finishDrag);
+        zone.addEventListener('pointercancel', finishDrag);
     }
 
     document.querySelectorAll('.ranking-question-card').forEach(function(card) {
         initCardFromSaved(card);
-        setupDrag(card);
+        setupRankedReorder(card);
 
         poolZone(card).addEventListener('click', function(e) {
             const item = e.target.closest('.ranking-item.pool-item');
@@ -1118,11 +1162,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         rankedZone(card).addEventListener('click', function(e) {
-            if (e.target.closest('.rank-drag-handle')) return;
             const badgeEl = e.target.closest('.rank-badge');
             if (!badgeEl) return;
             const item = badgeEl.closest('.ranking-item.ranked');
-            if (item) unrankItem(card, item);
+            if (!item) return;
+            if (item.dataset.didDrag === '1') {
+                delete item.dataset.didDrag;
+                return;
+            }
+            unrankItem(card, item);
         });
     });
 });

@@ -98,7 +98,7 @@
                 <div class="card-body">
                     <h6 class="survey-title" title="{{ survey.name }}">{{ survey.name }}</h6>
                     <div class="survey-meta">
-                        <span class="badge bg-secondary">{{ '单选' if survey.type == 'single_choice' else '表格' }}</span>
+                        <span class="badge bg-secondary">{% if survey.type == 'single_choice' %}单选{% elif survey.type == 'table' %}表格{% elif survey.type == 'ranking' %}排序{% else %}{{ survey.type }}{% endif %}</span>
                         <div class="mt-2">
                             已收集 <strong>{{ stat.total_count }}</strong> 条数据
                         </div>

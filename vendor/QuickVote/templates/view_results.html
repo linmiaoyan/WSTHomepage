@@ -179,6 +179,47 @@
         </div>
     </div>
     
+    {% if survey.type == 'ranking' and ranking_scores %}
+    <div class="results-section">
+        <div class="section-header">
+            <span>加权统计（平均综合得分）</span>
+        </div>
+        <p class="text-muted px-3" style="font-size: 0.9rem;">
+            得分越高表示综合排序越靠前。某用户选 N 项时，第 i 名权重为 N−i+1；选项平均综合得分 = Σ(该名次人数×权重) / 作答人数。
+        </p>
+        {% for block in ranking_scores %}
+        <div class="mb-4 px-3">
+            <h6 class="mb-2">{{ block.question.content }} <small class="text-muted">（{{ block.total_respondents }} 人作答）</small></h6>
+            <div style="overflow-x: auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>选项</th>
+                            <th>平均综合得分</th>
+                            {% set max_rank = block.question.rank_max or 4 %}
+                            {% for r in range(1, max_rank + 1) %}
+                            <th>第{{ r }}名人数</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for stat in block.option_stats|sort(attribute='avg_score', reverse=true) %}
+                        <tr>
+                            <td>{{ stat.label }}</td>
+                            <td><strong>{{ stat.avg_score }}</strong></td>
+                            {% for r in range(1, max_rank + 1) %}
+                            <td>{{ stat.freq_by_rank.get(r, 0) }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
     <!-- 投票数据 -->
     <div class="results-section">
         <div class="section-header">
@@ -198,7 +239,10 @@
                         {% if survey.type == 'table' %}
                         <th>人名</th>
                         {% endif %}
-                        <th>选项</th>
+                        <th>{% if survey.type == 'ranking' %}选项{% else %}选项{% endif %}</th>
+                        {% if survey.type == 'ranking' %}
+                        <th>名次</th>
+                        {% endif %}
                         <th>时间</th>
                     </tr>
                 </thead>
@@ -212,6 +256,9 @@
                         <td>{{ vote.respondent or '-' }}</td>
                         {% endif %}
                         <td>{{ vote.option }}</td>
+                        {% if survey.type == 'ranking' %}
+                        <td>{{ vote.rank }}</td>
+                        {% endif %}
                         <td>{{ vote.time.strftime('%Y-%m-%d %H:%M:%S') if vote.time else '-' }}</td>
                     </tr>
                     {% endfor %}

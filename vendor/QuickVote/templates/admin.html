@@ -368,15 +368,12 @@
                 
                 <div>
                     <label class="form-label">问卷类型 <span class="text-danger">*</span></label>
-                    <div class="toggle-switch-container mt-2">
-                        <span class="toggle-label active" id="label-single">单选题问卷</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="survey_type_toggle" onchange="toggleSurveyType()">
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <span class="toggle-label" id="label-table">表格问卷</span>
-                        <input type="hidden" name="survey_type" id="survey_type_input" value="single_choice">
-                    </div>
+                    <select class="form-select mt-1" name="survey_type" id="survey_type_input" required>
+                        <option value="single_choice">单选题问卷（列表型）</option>
+                        <option value="table">表格问卷</option>
+                        <option value="ranking">排序问卷</option>
+                    </select>
+                    <small class="text-muted d-block mt-1">排序题：受访者从多个选项中选择若干项并排序，系统按加权规则统计平均综合得分</small>
                 </div>
                 
                 <div>
@@ -418,7 +415,7 @@
                     <div class="card-body">
                         <h6 class="survey-title" title="{{ survey.name }}">{{ survey.name }}</h6>
                         <div class="survey-meta">
-                            <span class="badge bg-secondary">{{ '单选' if survey.type == 'single_choice' else '表格' }}</span>
+                            <span class="badge bg-secondary">{% if survey.type == 'single_choice' %}单选{% elif survey.type == 'table' %}表格{% elif survey.type == 'ranking' %}排序{% else %}{{ survey.type }}{% endif %}</span>
                             {% if survey.type == 'table' %}
                             <span class="text-muted ms-2" style="font-size: 0.8125rem;">{{ 'ABCDE'[:survey.table_option_count] }}</span>
                             {% endif %}
@@ -471,23 +468,4 @@
         {% endif %}
     </div>
 </div>
-
-<script>
-    function toggleSurveyType() {
-        const toggle = document.getElementById('survey_type_toggle');
-        const input = document.getElementById('survey_type_input');
-        const labelSingle = document.getElementById('label-single');
-        const labelTable = document.getElementById('label-table');
-        
-        if (toggle.checked) {
-            input.value = 'table';
-            labelSingle.classList.remove('active');
-            labelTable.classList.add('active');
-        } else {
-            input.value = 'single_choice';
-            labelSingle.classList.add('active');
-            labelTable.classList.remove('active');
-        }
-    }
-</script>
 {% endblock %} 

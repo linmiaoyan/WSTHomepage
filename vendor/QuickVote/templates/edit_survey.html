@@ -842,22 +842,17 @@
                                   rows="10" placeholder="每行输入一个问题，例如：&#10;请问您为什么选择该类饮品？"></textarea>
                     </div>
                     <div class="row g-3 mb-3">
-                        <div class="col-md-4">
-                            <label for="ranking_option_count_batch" class="form-label">选项数量</label>
-                            <select class="form-select" id="ranking_option_count_batch" name="option_count_batch">
-                                {% for n in range(2, 11) %}
-                                <option value="{{ n }}" {% if n == 10 %}selected{% endif %}>{{ n }} 个选项 (A-{{ 'ABCDEFGHIJ'[n-1] }})</option>
-                                {% endfor %}
-                            </select>
+                        <div class="col-md-6">
+                            <label for="ranking_option_count_batch" class="form-label">默认选项数量（未填写排序项列表时使用）</label>
+                            <input type="number" class="form-control" id="ranking_option_count_batch" name="option_count_batch" min="2" max="100" value="10">
+                            <small class="text-muted">使用 A、B、C… 作为选项键</small>
                         </div>
-                        <div class="col-md-4">
-                            <label for="rank_min_batch" class="form-label">最少选择</label>
-                            <input type="number" class="form-control" id="rank_min_batch" name="rank_min_batch" min="1" max="10" value="1">
-                        </div>
-                        <div class="col-md-4">
-                            <label for="rank_max_batch" class="form-label">最多选择</label>
-                            <input type="number" class="form-control" id="rank_max_batch" name="rank_max_batch" min="1" max="10" value="4">
-                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ranking_options_list" class="form-label">排序项列表（每行一项，如人员姓名）</label>
+                        <textarea class="form-control" id="ranking_options_list" name="options_list" rows="8"
+                                  placeholder="例如：&#10;雷刚&#10;蒋海松&#10;李全勇&#10;冉隆岭"></textarea>
+                        <small class="text-muted">填写后各题共用此列表；不填则使用上方默认数量的字母选项</small>
                     </div>
                     <button type="submit" class="btn btn-success">批量添加</button>
                 </form>
@@ -873,7 +868,7 @@
             </div>
             <div class="section-content show">
                 <div class="alert alert-info mb-3" style="font-size: 0.9rem;">
-                    受访者需从各题选项中选择指定数量并排序。统计时使用<strong>平均综合得分</strong>：某用户选 N 项时，第 i 名权重为 N−i+1，选项得分 = Σ(频次×权重) / 作答人数。
+                    受访者点击选项即可加入排序并显示名次，已排序项可拖动调整顺序。点击蓝色数字可取消排序。
                 </div>
                 <div class="question-list-container">
                     {% if questions %}
@@ -903,8 +898,14 @@
                                     <span class="badge bg-secondary mb-2">排序题</span>
                                     <div class="question-meta">
                                         <span class="question-info">
-                                            选项: {{ 'ABCDEFGHIJ'[:(question.option_count or 4)] }}，
-                                            选择 {{ question.rank_min or 1 }}-{{ question.rank_max or 4 }} 项并排序
+                                            {% if question.custom_options %}
+                                                共 {{ question.custom_options|length }} 项：
+                                                {% for key, value in question.custom_options.items() %}
+                                                    {{ value }}{% if not loop.last %}、{% endif %}
+                                                {% endfor %}
+                                            {% else %}
+                                                共 {{ question.option_count or 4 }} 项（{{ 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[:(question.option_count or 4)] }}）
+                                            {% endif %}
                                         </span>
                                         <div class="question-actions" onclick="event.stopPropagation()">
                                             <div class="btn-group btn-group-sm me-2">
@@ -929,8 +930,7 @@
                                                     data-question-id="{{ question.id }}"
                                                     data-question-content='{{ question.content|tojson }}'
                                                     data-option-count="{{ question.option_count }}"
-                                                    data-rank-min="{{ question.rank_min or 1 }}"
-                                                    data-rank-max="{{ question.rank_max or 4 }}"
+                                                    data-options-list='{{ (question.custom_options.values()|list if question.custom_options else [])|tojson }}'
                                                     onclick="editRankingQuestion(this)">
                                                 编辑
                                             </button>
@@ -963,21 +963,15 @@
                 </div>
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">
-                        <label for="edit_ranking_option_count" class="form-label">选项数量</label>
-                        <select class="form-select" id="edit_ranking_option_count" name="option_count">
-                            {% for n in range(2, 11) %}
-                            <option value="{{ n }}">{{ n }} 个选项</option>
-                            {% endfor %}
-                        </select>
+                        <label for="edit_ranking_option_count" class="form-label">字母选项数量</label>
+                        <input type="number" class="form-control" id="edit_ranking_option_count" name="option_count" min="2" max="100" value="10">
+                        <small class="text-muted">未填写下方列表时使用</small>
                     </div>
-                    <div class="col-md-4">
-                        <label for="edit_rank_min" class="form-label">最少选择</label>
-                        <input type="number" class="form-control" id="edit_rank_min" name="rank_min" min="1" max="10" value="1">
-                    </div>
-                    <div class="col-md-4">
-                        <label for="edit_rank_max" class="form-label">最多选择</label>
-                        <input type="number" class="form-control" id="edit_rank_max" name="rank_max" min="1" max="10" value="4">
-                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="edit_ranking_options_list" class="form-label">排序项列表（每行一项）</label>
+                    <textarea class="form-control" id="edit_ranking_options_list" name="options_list" rows="8"
+                              placeholder="每行一个排序项，如人员姓名"></textarea>
                 </div>
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">保存</button>
@@ -1279,10 +1273,10 @@
         try {
             const questionId = button.getAttribute('data-question-id');
             const content = JSON.parse(button.getAttribute('data-question-content'));
+            const optionsList = JSON.parse(button.getAttribute('data-options-list') || '[]');
             document.getElementById('edit_ranking_question_content').value = content;
             document.getElementById('edit_ranking_option_count').value = button.getAttribute('data-option-count') || '10';
-            document.getElementById('edit_rank_min').value = button.getAttribute('data-rank-min') || '1';
-            document.getElementById('edit_rank_max').value = button.getAttribute('data-rank-max') || '4';
+            document.getElementById('edit_ranking_options_list').value = optionsList.join('\n');
             document.getElementById('editRankingQuestionForm').action = "{{ url_for('update_question', question_id=0) }}".replace('0', questionId);
             const editCard = document.getElementById('editRankingQuestionCard');
             editCard.style.display = 'block';

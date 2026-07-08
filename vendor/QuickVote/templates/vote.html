@@ -72,19 +72,85 @@
     .ranking-option-row:last-child {
         border-bottom: none;
     }
-    .ranking-option-row .form-check-input {
-        width: 1.1rem;
-        height: 1.1rem;
-        flex-shrink: 0;
+    .ranking-ranked-zone {
+        min-height: 0.5rem;
     }
-    .ranking-option-label {
-        flex: 1;
-        margin-bottom: 0;
+    .ranking-pool-zone {
+        margin-top: 0.25rem;
+        padding-top: 0.25rem;
+    }
+    .ranking-pool-zone.has-ranked-above {
+        border-top: 1px solid #e2e8f0;
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+    }
+    .ranking-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.7rem 0.25rem;
+        border-bottom: 1px solid #edf2f7;
+        touch-action: none;
+    }
+    .ranking-item:last-child {
+        border-bottom: none;
+    }
+    .ranking-item.ranked {
+        cursor: default;
+    }
+    .ranking-item.pool-item {
         cursor: pointer;
     }
-    .ranking-rank-select {
-        width: 5.5rem;
+    .ranking-item.pool-item:hover {
+        background: #f7fafc;
+    }
+    .rank-badge {
+        width: 2rem;
+        height: 2rem;
+        min-width: 2rem;
+        border: 2px solid #cbd5e0;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         flex-shrink: 0;
+        background: #fff;
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: transparent;
+        user-select: none;
+    }
+    .ranking-item.ranked .rank-badge {
+        background: #3182ce;
+        border-color: #3182ce;
+        color: #fff;
+        cursor: pointer;
+    }
+    .rank-label {
+        flex: 1;
+        color: #2d3748;
+        font-size: 1rem;
+    }
+    .rank-drag-handle {
+        display: none;
+        width: 1.5rem;
+        text-align: center;
+        color: #a0aec0;
+        cursor: grab;
+        font-size: 1.1rem;
+        line-height: 1;
+        letter-spacing: -2px;
+        user-select: none;
+        flex-shrink: 0;
+    }
+    .ranking-item.ranked .rank-drag-handle {
+        display: block;
+    }
+    .ranking-item.dragging {
+        opacity: 0.45;
+    }
+    .ranking-item.drag-over-top {
+        box-shadow: inset 0 2px 0 0 #3182ce;
     }
     .ranking-hint {
         color: #718096;
@@ -393,50 +459,43 @@
 
         {% elif survey.type == 'ranking' %}
             {% for question in questions %}
-            {% set rank_min = question.rank_min if question.rank_min is not none else 1 %}
-            {% set rank_max = question.rank_max if question.rank_max is not none else 4 %}
-            {% set option_keys = question.custom_options.keys()|list if question.custom_options else 'ABCDEFGHIJ'[:(question.option_count or 4)] %}
-            <div class="card mb-3 question-card ranking-question-card"
-                 data-question-id="{{ question.id }}"
-                 data-rank-min="{{ rank_min }}"
-                 data-rank-max="{{ rank_max }}">
+            {% if question.custom_options %}
+                {% set option_keys = question.custom_options.keys()|list %}
+            {% else %}
+                {% set option_keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[:(question.option_count or 4)] %}
+            {% endif %}
+            <div class="card mb-3 question-card ranking-question-card" data-question-id="{{ question.id }}">
                 <div class="card-body">
                     <h5 class="card-title" style="font-weight: 600; margin-bottom: 0.5rem; color: #2c3e50;">
                         <span class="text-danger">*</span> {{ loop.index }}. {{ question.content }}
                     </h5>
-                    <p class="ranking-hint">[请选择{{ rank_min }}-{{ rank_max }}项并排序]</p>
-                    <div class="ranking-options">
+                    <p class="ranking-hint">[请排序]</p>
+                    <div class="ranking-ranked-zone" id="ranked_zone_{{ question.id }}"></div>
+                    <div class="ranking-pool-zone" id="pool_zone_{{ question.id }}">
                         {% for opt in option_keys %}
                         {% set rank_field = 'rank_' ~ question.id ~ '_' ~ opt %}
                         {% set saved_rank = saved_choices.get(rank_field, '') %}
-                        <div class="ranking-option-row" data-option="{{ opt }}">
-                            <input type="checkbox"
-                                   class="form-check-input ranking-select"
-                                   id="sel_{{ question.id }}_{{ opt }}"
-                                   data-question-id="{{ question.id }}"
-                                   data-option="{{ opt }}"
-                                   {% if saved_rank %}checked{% endif %}>
-                            <label class="ranking-option-label" for="sel_{{ question.id }}_{{ opt }}">
-                                {% if question.custom_options and opt in question.custom_options %}
-                                    {{ opt }}. {{ question.custom_options[opt] }}
-                                {% else %}
-                                    {{ opt }}
-                                {% endif %}
-                            </label>
-                            <select class="form-select form-select-sm ranking-rank-select"
-                                    name="rank_{{ question.id }}_{{ opt }}"
-                                    id="rank_{{ question.id }}_{{ opt }}"
-                                    {% if not saved_rank %}disabled{% endif %}>
-                                <option value="">名次</option>
-                                {% for n in range(1, rank_max + 1) %}
-                                <option value="{{ n }}" {% if saved_rank|string == n|string %}selected{% endif %}>{{ n }}</option>
-                                {% endfor %}
-                            </select>
+                        {% if question.custom_options and opt in question.custom_options %}
+                            {% set option_label = question.custom_options[opt] %}
+                        {% else %}
+                            {% set option_label = opt %}
+                        {% endif %}
+                        <div class="ranking-item pool-item"
+                             data-option="{{ opt }}"
+                             data-label="{{ option_label }}"
+                             data-saved-rank="{{ saved_rank }}">
+                            <div class="rank-badge" title="点击排序">{% if saved_rank %}{{ saved_rank }}{% endif %}</div>
+                            <div class="rank-label">{{ option_label }}</div>
+                            <div class="rank-drag-handle" title="拖动调整顺序">⋮⋮</div>
+                            <input type="hidden"
+                                   class="ranking-value-input"
+                                   name="rank_{{ question.id }}_{{ opt }}"
+                                   value="{{ saved_rank }}">
                         </div>
                         {% endfor %}
                     </div>
                     <div class="missing-field-alert" id="missing_{{ question.id }}">
-                        请选择 {{ rank_min }}-{{ rank_max }} 项并为每项指定不重复的排序名次
+                        请至少排序一项（点击下方选项即可加入排序，已排序项可拖动调整）
                     </div>
                 </div>
             </div>
@@ -942,80 +1001,129 @@ document.addEventListener('DOMContentLoaded', function() {
 {% if survey.type == 'ranking' %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    function getSelectedRows(card) {
-        return Array.from(card.querySelectorAll('.ranking-select:checked')).map(function(cb) {
-            return cb.closest('.ranking-option-row');
-        });
+    function rankedZone(card) { return card.querySelector('.ranking-ranked-zone'); }
+    function poolZone(card) { return card.querySelector('.ranking-pool-zone'); }
+    function rankedItems(card) { return Array.from(rankedZone(card).querySelectorAll('.ranking-item')); }
+    function hiddenInput(item) { return item.querySelector('.ranking-value-input'); }
+    function badge(item) { return item.querySelector('.rank-badge'); }
+
+    function updatePoolBorder(card) {
+        const pool = poolZone(card);
+        if (rankedItems(card).length > 0) pool.classList.add('has-ranked-above');
+        else pool.classList.remove('has-ranked-above');
     }
 
-    function refreshRankSelectOptions(card) {
-        const rankMax = parseInt(card.getAttribute('data-rank-max') || '4', 10);
-        const selectedCount = getSelectedRows(card).length;
-        card.querySelectorAll('.ranking-rank-select').forEach(function(sel) {
-            const row = sel.closest('.ranking-option-row');
-            const checked = row.querySelector('.ranking-select').checked;
-            const current = sel.value;
-            sel.innerHTML = '<option value="">名次</option>';
-            const limit = Math.min(selectedCount || rankMax, rankMax);
-            for (let n = 1; n <= limit; n++) {
-                const opt = document.createElement('option');
-                opt.value = String(n);
-                opt.textContent = String(n);
-                sel.appendChild(opt);
-            }
-            if (checked && current && parseInt(current, 10) <= limit) {
-                sel.value = current;
-            } else if (checked && !current) {
-                sel.value = String(selectedCount);
-            } else if (!checked) {
-                sel.value = '';
-                sel.disabled = true;
-            } else {
-                sel.disabled = false;
-            }
+    function renumberRanked(card) {
+        rankedItems(card).forEach(function(item, idx) {
+            const rank = idx + 1;
+            badge(item).textContent = String(rank);
+            hiddenInput(item).value = String(rank);
         });
+        updatePoolBorder(card);
     }
 
-    function autoAssignRanks(card) {
-        const rows = getSelectedRows(card);
-        rows.forEach(function(row, idx) {
-            const sel = row.querySelector('.ranking-rank-select');
-            sel.disabled = false;
-            sel.value = String(idx + 1);
+    function rankItem(card, item) {
+        if (item.classList.contains('ranked')) return;
+        rankedZone(card).appendChild(item);
+        item.classList.add('ranked');
+        item.classList.remove('pool-item');
+        item.setAttribute('draggable', 'true');
+        renumberRanked(card);
+        card.classList.remove('ranking-invalid');
+        const alertEl = document.getElementById('missing_' + card.getAttribute('data-question-id'));
+        if (alertEl) alertEl.style.display = 'none';
+    }
+
+    function unrankItem(card, item) {
+        if (!item.classList.contains('ranked')) return;
+        item.classList.remove('ranked');
+        item.classList.add('pool-item');
+        badge(item).textContent = '';
+        hiddenInput(item).value = '';
+        item.removeAttribute('draggable');
+        poolZone(card).appendChild(item);
+        renumberRanked(card);
+    }
+
+    function initCardFromSaved(card) {
+        const ranked = rankedZone(card);
+        const pool = poolZone(card);
+        const items = Array.from(card.querySelectorAll('.ranking-item'));
+        const saved = items.map(function(item) {
+            const raw = item.getAttribute('data-saved-rank') || hiddenInput(item).value || '';
+            return { item: item, rank: parseInt(raw, 10) || 0 };
+        }).filter(function(x) { return x.rank > 0; }).sort(function(a, b) { return a.rank - b.rank; });
+        saved.forEach(function(x) {
+            ranked.appendChild(x.item);
+            x.item.classList.add('ranked');
+            x.item.classList.remove('pool-item');
+            x.item.setAttribute('draggable', 'true');
         });
-        card.querySelectorAll('.ranking-option-row').forEach(function(row) {
-            const cb = row.querySelector('.ranking-select');
-            const sel = row.querySelector('.ranking-rank-select');
-            if (!cb.checked) {
-                sel.value = '';
-                sel.disabled = true;
+        items.filter(function(i) { return !i.classList.contains('ranked'); }).forEach(function(i) {
+            pool.appendChild(i);
+        });
+        renumberRanked(card);
+    }
+
+    function setupDrag(card) {
+        const zone = rankedZone(card);
+        let dragEl = null;
+
+        zone.addEventListener('dragstart', function(e) {
+            const item = e.target.closest('.ranking-item.ranked');
+            if (!item || !e.target.closest('.rank-drag-handle')) {
+                e.preventDefault();
+                return;
             }
+            dragEl = item;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', item.getAttribute('data-option') || ''); } catch (err) {}
+        });
+
+        zone.addEventListener('dragend', function() {
+            if (dragEl) dragEl.classList.remove('dragging');
+            zone.querySelectorAll('.ranking-item').forEach(function(el) { el.classList.remove('drag-over-top'); });
+            dragEl = null;
+            renumberRanked(card);
+        });
+
+        zone.addEventListener('dragover', function(e) {
+            if (!dragEl) return;
+            e.preventDefault();
+            const target = e.target.closest('.ranking-item.ranked');
+            zone.querySelectorAll('.ranking-item').forEach(function(el) { el.classList.remove('drag-over-top'); });
+            if (target && target !== dragEl) {
+                target.classList.add('drag-over-top');
+                const rect = target.getBoundingClientRect();
+                const before = (e.clientY - rect.top) < rect.height / 2;
+                zone.insertBefore(dragEl, before ? target : target.nextSibling);
+            }
+        });
+
+        zone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            renumberRanked(card);
         });
     }
 
     document.querySelectorAll('.ranking-question-card').forEach(function(card) {
-        const rankMax = parseInt(card.getAttribute('data-rank-max') || '4', 10);
-        card.querySelectorAll('.ranking-select').forEach(function(cb) {
-            cb.addEventListener('change', function() {
-                const selected = getSelectedRows(card).length;
-                if (cb.checked && selected > rankMax) {
-                    cb.checked = false;
-                    alert('最多只能选择 ' + rankMax + ' 项');
-                    return;
-                }
-                refreshRankSelectOptions(card);
-                autoAssignRanks(card);
-                card.classList.remove('ranking-invalid');
-                const alertEl = document.getElementById('missing_' + card.getAttribute('data-question-id'));
-                if (alertEl) alertEl.style.display = 'none';
-            });
+        initCardFromSaved(card);
+        setupDrag(card);
+
+        poolZone(card).addEventListener('click', function(e) {
+            const item = e.target.closest('.ranking-item.pool-item');
+            if (!item) return;
+            rankItem(card, item);
         });
-        card.querySelectorAll('.ranking-rank-select').forEach(function(sel) {
-            sel.addEventListener('change', function() {
-                card.classList.remove('ranking-invalid');
-            });
+
+        rankedZone(card).addEventListener('click', function(e) {
+            if (e.target.closest('.rank-drag-handle')) return;
+            const badgeEl = e.target.closest('.rank-badge');
+            if (!badgeEl) return;
+            const item = badgeEl.closest('.ranking-item.ranked');
+            if (item) unrankItem(card, item);
         });
-        refreshRankSelectOptions(card);
     });
 });
 </script>
@@ -1030,27 +1138,12 @@ document.addEventListener('DOMContentLoaded', function() {
         let invalid = 0;
         let firstInvalid = null;
         document.querySelectorAll('.ranking-question-card').forEach(function(card) {
-            const rankMin = parseInt(card.getAttribute('data-rank-min') || '1', 10);
-            const rankMax = parseInt(card.getAttribute('data-rank-max') || '4', 10);
-            const rows = Array.from(card.querySelectorAll('.ranking-select:checked'));
             const qid = card.getAttribute('data-question-id');
             const alertEl = document.getElementById('missing_' + qid);
             card.classList.remove('ranking-invalid');
             if (alertEl) alertEl.style.display = 'none';
-
-            if (rows.length < rankMin || rows.length > rankMax) {
-                invalid += 1;
-                card.classList.add('ranking-invalid');
-                if (alertEl) alertEl.style.display = 'block';
-                if (!firstInvalid) firstInvalid = card;
-                return;
-            }
-            const ranks = rows.map(function(cb) {
-                return parseInt(cb.closest('.ranking-option-row').querySelector('.ranking-rank-select').value, 10);
-            });
-            const expected = Array.from({length: rows.length}, function(_, i) { return i + 1; }).sort(function(a,b){return a-b;});
-            ranks.sort(function(a,b){return a-b;});
-            if (ranks.some(function(r){ return !r || isNaN(r); }) || ranks.join(',') !== expected.join(',')) {
+            const ranked = card.querySelectorAll('.ranking-ranked-zone .ranking-item');
+            if (ranked.length === 0) {
                 invalid += 1;
                 card.classList.add('ranking-invalid');
                 if (alertEl) alertEl.style.display = 'block';
@@ -1063,7 +1156,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (firstInvalid) firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
             const err = document.getElementById('vote-form-error');
             if (err) {
-                err.textContent = '还有 ' + invalid + ' 道排序题未完成或排序无效，请补全后再提交。';
+                err.textContent = '还有 ' + invalid + ' 道排序题未完成，请至少排序一项后再提交。';
                 err.style.display = 'block';
                 err.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }

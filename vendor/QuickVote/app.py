@@ -248,7 +248,25 @@ def _question_option_keys(question):
     if question.custom_options:
         return list(question.custom_options.keys())
     count = question.option_count or 4
-    return list('ABCDEFGHIJ'[:count])
+    return _generate_option_keys(count)
+
+def _generate_option_keys(count):
+    """生成选项键（A-Z，超出后用 O1、O2…）。"""
+    letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    keys = []
+    for i in range(max(int(count or 0), 0)):
+        if i < len(letters):
+            keys.append(letters[i])
+        else:
+            keys.append(f'O{i - len(letters) + 1}')
+    return keys
+
+def _labels_to_custom_options(labels):
+    labels = [str(x).strip() for x in labels if str(x).strip()]
+    if not labels:
+        return None
+    keys = _generate_option_keys(len(labels))
+    return dict(zip(keys, labels))
 
 def compute_ranking_weighted_scores(survey_id):
     """计算排序题各选项的平均综合得分（权重 = 该用户所选 N 项时第 i 名的 N-i+1）。"""
@@ -289,6 +307,7 @@ def compute_ranking_weighted_scores(survey_id):
             'question': question,
             'total_respondents': total_respondents,
             'option_stats': option_stats,
+            'max_rank': max((r for stat in option_stats for r in stat['freq_by_rank']), default=0),
         })
     return results
 
@@ -1029,8 +1048,6 @@ def submit_vote(survey_id):
     elif survey.type == 'ranking':
         questions = Question.query.filter_by(survey_id=survey_id).order_by(Question.order_index, Question.id).all()
         for question in questions:
-            rank_min = question.rank_min if question.rank_min is not None else 1
-            rank_max = question.rank_max if question.rank_max is not None else 4
             prefix = f'rank_{question.id}_'
             selections = {}
             for key, val in request.form.items():
@@ -1041,13 +1058,12 @@ def submit_vote(survey_id):
                     except ValueError:
                         flash('排序名次无效，请重新选择', 'danger')
                         return redirect(url_for('vote', survey_id=survey_id))
-            count = len(selections)
-            if count < rank_min or count > rank_max:
-                flash(f'「{question.content}」请选择 {rank_min}-{rank_max} 项并完成排序', 'danger')
+            if not selections:
+                flash(f'「{question.content}」请至少排序一项', 'danger')
                 return redirect(url_for('vote', survey_id=survey_id))
-            expected = list(range(1, count + 1))
+            expected = list(range(1, len(selections) + 1))
             if sorted(selections.values()) != expected:
-                flash(f'「{question.content}」排序名次必须连续且不重复（1 至 {count}）', 'danger')
+                flash(f'「{question.content}」排序名次必须连续且不重复', 'danger')
                 return redirect(url_for('vote', survey_id=survey_id))
             valid_keys = set(_question_option_keys(question))
             for opt in selections:
@@ -1725,24 +1741,21 @@ def edit_survey(survey_id):
         elif survey.type == 'ranking':
             if action == 'import_list':
                 question_list_text = request.form.get('question_list')
-                option_count_batch = int(request.form.get('option_count_batch', 10))
-                rank_min_batch = int(request.form.get('rank_min_batch', 1))
-                rank_max_batch = int(request.form.get('rank_max_batch', 4))
-                if rank_min_batch < 1 or rank_max_batch < rank_min_batch:
-                    flash('排序题最少/最多选择数量无效', 'danger')
-                    return redirect(url_for('edit_survey', survey_id=survey_id))
+                options_list_text = request.form.get('options_list', '')
+                option_count_batch = int(request.form.get('option_count_batch', 10) or 10)
+                custom_options = _labels_to_custom_options(options_list_text.split('\n')) if options_list_text.strip() else None
                 if question_list_text:
                     max_order = db.session.query(db.func.max(Question.order_index)).filter_by(survey_id=survey_id).scalar() or 0
                     questions_content = [q.strip() for q in question_list_text.split('\n') if q.strip()]
+                    option_count = len(custom_options) if custom_options else max(option_count_batch, 2)
                     for idx, content in enumerate(questions_content):
                         question = Question(
                             survey_id=survey.id,
                             tenant_id=int(getattr(survey, 'tenant_id', 1) or 1),
                             content=content,
-                            option_count=min(max(option_count_batch, 2), 10),
+                            option_count=option_count,
+                            custom_options=custom_options.copy() if custom_options else None,
                             component_type='standard',
-                            rank_min=rank_min_batch,
-                            rank_max=rank_max_batch,
                             order_index=max_order + idx + 1
                         )
                         db.session.add(question)
@@ -1805,15 +1818,16 @@ def update_question(question_id):
         option_count = int(request.form.get('option_count', 4))
         question.option_count = option_count
     elif survey.type == 'ranking':
-        option_count = int(request.form.get('option_count', 10))
-        question.option_count = min(max(option_count, 2), 10)
-        rank_min = int(request.form.get('rank_min', 1))
-        rank_max = int(request.form.get('rank_max', 4))
-        if rank_min < 1 or rank_max < rank_min:
-            flash('最少/最多选择数量无效', 'danger')
-            return redirect(url_for('edit_survey', survey_id=survey.id))
-        question.rank_min = rank_min
-        question.rank_max = rank_max
+        option_count = int(request.form.get('option_count', 10) or 10)
+        options_list_text = request.form.get('options_list', '')
+        if options_list_text.strip():
+            custom_options = _labels_to_custom_options(options_list_text.split('\n'))
+            if custom_options:
+                question.custom_options = custom_options
+                question.option_count = len(custom_options)
+        else:
+            question.option_count = max(option_count, 2)
+            question.custom_options = None
     
     db.session.commit()
     flash('问题已更新', 'success')

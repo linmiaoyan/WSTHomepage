@@ -340,10 +340,7 @@ def _ranking_weighted_rows(survey_id):
                 '问题': qname,
                 '选项': stat['label'],
                 '平均综合得分': stat['avg_score'],
-                '作答人数': block['total_respondents'],
             }
-            for rank, freq in sorted(stat['freq_by_rank'].items()):
-                row[f'第{rank}名人数'] = freq
             weighted_rows.append(row)
     return weighted_rows
 

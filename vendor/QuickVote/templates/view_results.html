@@ -41,6 +41,14 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+
+    .section-header-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
     }
     
     .stats-grid {
@@ -100,6 +108,7 @@
         display: flex;
         gap: 0.75rem;
         margin-top: 1.5rem;
+        flex-wrap: wrap;
     }
     
     @media (max-width: 768px) {
@@ -135,7 +144,12 @@
 <div class="results-container">
     <div class="page-header">
         <h2>查看结果：{{ survey.name }}</h2>
-        <a href="{{ url_for('admin') }}" class="btn btn-secondary">返回问卷列表</a>
+        <div class="d-flex gap-2 flex-wrap">
+            {% if survey.type == 'ranking' and show_raw %}
+            <a href="{{ url_for('view_results', survey_id=survey.id) }}" class="btn btn-outline-primary btn-sm">返回加权统计</a>
+            {% endif %}
+            <a href="{{ url_for('admin') }}" class="btn btn-secondary btn-sm">返回问卷列表</a>
+        </div>
     </div>
     
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -152,6 +166,12 @@
             <span>统计数据</span>
         </div>
         <div class="stats-grid">
+            {% if survey.type == 'ranking' %}
+            <div class="stat-card">
+                <div class="stat-value">{{ submission_count }}</div>
+                <div class="stat-label">提交人次</div>
+            </div>
+            {% else %}
             <div class="stat-card">
                 <div class="stat-value">{{ total_votes }}</div>
                 <div class="stat-label">总投票数</div>
@@ -160,6 +180,7 @@
                 <div class="stat-value">{{ unique_users }}</div>
                 <div class="stat-label">参与用户数</div>
             </div>
+            {% endif %}
             {% if survey.type == 'table' %}
             <div class="stat-card">
                 <div class="stat-value">{{ unique_respondents }}</div>
@@ -179,14 +200,19 @@
         </div>
     </div>
     
-    {% if survey.type == 'ranking' and ranking_scores %}
+    {% if survey.type == 'ranking' and not show_raw %}
     <div class="results-section">
         <div class="section-header">
             <span>加权统计（平均综合得分）</span>
+            <div class="section-header-actions">
+                <a href="{{ url_for('download_results', survey_id=survey.id) }}" class="btn btn-success btn-sm">下载加权 Excel</a>
+                <a href="{{ url_for('view_results', survey_id=survey.id, show_raw=1) }}" class="btn btn-outline-secondary btn-sm">查看原始投票数据</a>
+            </div>
         </div>
         <p class="text-muted px-3" style="font-size: 0.9rem;">
             得分越高表示综合排序越靠前。某用户选 N 项时，第 i 名权重为 N−i+1；选项平均综合得分 = Σ(该名次人数×权重) / 作答人数。
         </p>
+        {% if ranking_scores %}
         {% for block in ranking_scores %}
         <div class="mb-4 px-3">
             <h6 class="mb-2">{{ block.question.content }} <small class="text-muted">（{{ block.total_respondents }} 人作答）</small></h6>
@@ -217,14 +243,55 @@
             </div>
         </div>
         {% endfor %}
+        {% else %}
+        <p class="text-muted text-center py-4">暂无加权统计数据</p>
+        {% endif %}
     </div>
-    {% endif %}
-    
-    <!-- 投票数据 -->
+    {% elif survey.type == 'ranking' and show_raw %}
+    <div class="results-section">
+        <div class="section-header">
+            <span>原始投票数据</span>
+            <div class="section-header-actions">
+                <a href="{{ url_for('download_ranking_raw', survey_id=survey.id) }}" class="btn btn-success btn-sm">下载原始 Excel</a>
+            </div>
+        </div>
+        {% if votes_data %}
+        <div style="overflow-x: auto;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>用户</th>
+                        <th>问题</th>
+                        <th>选项</th>
+                        <th>名次</th>
+                        <th>时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vote in votes_data %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ vote.user }}</td>
+                        <td>{{ vote.question }}</td>
+                        <td>{{ vote.option }}</td>
+                        <td>{{ vote.rank }}</td>
+                        <td>{{ vote.time.strftime('%Y-%m-%d %H:%M:%S') if vote.time else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">暂无原始投票数据</p>
+        {% endif %}
+    </div>
+    {% else %}
+    <!-- 非排序题：投票数据 -->
     <div class="results-section">
         <div class="section-header">
             <span>投票数据</span>
-            <div>
+            <div class="section-header-actions">
                 <a href="{{ url_for('download_results', survey_id=survey.id) }}" class="btn btn-success btn-sm">下载 Excel</a>
             </div>
         </div>
@@ -239,10 +306,7 @@
                         {% if survey.type == 'table' %}
                         <th>人名</th>
                         {% endif %}
-                        <th>{% if survey.type == 'ranking' %}选项{% else %}选项{% endif %}</th>
-                        {% if survey.type == 'ranking' %}
-                        <th>名次</th>
-                        {% endif %}
+                        <th>选项</th>
                         <th>时间</th>
                     </tr>
                 </thead>
@@ -256,9 +320,6 @@
                         <td>{{ vote.respondent or '-' }}</td>
                         {% endif %}
                         <td>{{ vote.option }}</td>
-                        {% if survey.type == 'ranking' %}
-                        <td>{{ vote.rank }}</td>
-                        {% endif %}
                         <td>{{ vote.time.strftime('%Y-%m-%d %H:%M:%S') if vote.time else '-' }}</td>
                     </tr>
                     {% endfor %}
@@ -269,6 +330,7 @@
         <p class="text-muted text-center py-4">暂无投票数据</p>
         {% endif %}
     </div>
+    {% endif %}
     
     <!-- 主观题回答 -->
     {% if subjective_answers %}
@@ -304,9 +366,25 @@
     <!-- 操作按钮 -->
     <div class="results-section">
         <div class="action-buttons">
+            {% if survey.type == 'ranking' and not show_raw %}
+            <a href="{{ url_for('download_results', survey_id=survey.id) }}" class="btn btn-success">
+                下载加权 Excel
+            </a>
+            <a href="{{ url_for('view_results', survey_id=survey.id, show_raw=1) }}" class="btn btn-outline-secondary">
+                查看原始投票数据
+            </a>
+            {% elif survey.type == 'ranking' and show_raw %}
+            <a href="{{ url_for('download_ranking_raw', survey_id=survey.id) }}" class="btn btn-success">
+                下载原始 Excel
+            </a>
+            <a href="{{ url_for('view_results', survey_id=survey.id) }}" class="btn btn-outline-primary">
+                返回加权统计
+            </a>
+            {% else %}
             <a href="{{ url_for('download_results', survey_id=survey.id) }}" class="btn btn-success">
                 下载 Excel 文件
             </a>
+            {% endif %}
             <form action="{{ url_for('delete_results', survey_id=survey.id) }}" method="post" 
                   onsubmit="return confirm('您确定要删除问卷 \"{{ survey.name }}\" 的所有投票数据吗？此操作不可撤销！');"
                   style="display: inline;">

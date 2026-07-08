@@ -311,6 +311,55 @@ def compute_ranking_weighted_scores(survey_id):
         })
     return results
 
+def _collect_ranking_votes_data(survey_id):
+    """排序题原始投票明细（每人每选项一行）。"""
+    votes_data = []
+    votes = Vote.query.join(Question).filter(
+        Question.survey_id == survey_id,
+        Vote.option_key.isnot(None)
+    ).order_by(Vote.created_at.desc()).all()
+    for vote in votes:
+        label = vote.option_key
+        if vote.question.custom_options and vote.option_key in vote.question.custom_options:
+            label = f"{vote.option_key}. {vote.question.custom_options[vote.option_key]}"
+        votes_data.append({
+            'user': vote.user.username,
+            'question': vote.question.content,
+            'option': label,
+            'rank': vote.score,
+            'time': vote.created_at
+        })
+    return votes_data
+
+def _ranking_weighted_rows(survey_id):
+    weighted_rows = []
+    for block in compute_ranking_weighted_scores(survey_id):
+        qname = block['question'].content.replace(' ', '-')
+        for stat in block['option_stats']:
+            row = {
+                '问题': qname,
+                '选项': stat['label'],
+                '平均综合得分': stat['avg_score'],
+                '作答人数': block['total_respondents'],
+            }
+            for rank, freq in sorted(stat['freq_by_rank'].items()):
+                row[f'第{rank}名人数'] = freq
+            weighted_rows.append(row)
+    return weighted_rows
+
+def _send_ranking_excel(rows, filename, sheet_name='加权统计'):
+    df = pd.DataFrame(rows)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename,
+    )
+
 def _count_survey_submissions(survey):
     """统计问卷提交人次（独立作答用户数），而非原始投票条数。"""
     question_ids = [
@@ -1154,6 +1203,8 @@ def view_results(survey_id):
     survey = Survey.query.get_or_404(survey_id)
     if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
         abort(403)
+
+    show_raw = request.args.get('show_raw') == '1'
     
     # 获取投票数据
     votes_data = []
@@ -1180,22 +1231,8 @@ def view_results(survey_id):
                 'option': vote.score,
                 'time': vote.created_at
             })
-    elif survey.type == 'ranking':
-        votes = Vote.query.join(Question).filter(
-            Question.survey_id == survey_id,
-            Vote.option_key.isnot(None)
-        ).order_by(Vote.created_at.desc()).all()
-        for vote in votes:
-            label = vote.option_key
-            if vote.question.custom_options and vote.option_key in vote.question.custom_options:
-                label = f"{vote.option_key}. {vote.question.custom_options[vote.option_key]}"
-            votes_data.append({
-                'user': vote.user.username,
-                'question': vote.question.content,
-                'option': label,
-                'rank': vote.score,
-                'time': vote.created_at
-            })
+    elif survey.type == 'ranking' and show_raw:
+        votes_data = _collect_ranking_votes_data(survey_id)
     
     # 获取主观题回答
     subjective_answers = SubjectiveAnswer.query.filter_by(survey_id=survey_id).order_by(SubjectiveAnswer.created_at.desc()).all()
@@ -1209,7 +1246,12 @@ def view_results(survey_id):
     
     # 统计数据
     total_votes = len(votes_data)
-    unique_users = len(set(v['user'] for v in votes_data))
+    if survey.type == 'ranking':
+        submission_count = _count_survey_submissions(survey)
+        unique_users = submission_count
+    else:
+        submission_count = len(set(v['user'] for v in votes_data)) if votes_data else 0
+        unique_users = submission_count
     unique_respondents = len(set(v.get('respondent') for v in votes_data if v.get('respondent'))) if survey.type == 'table' else 0
     total_questions = len(survey.questions)
     total_subjective_answers = len(subjective_data)
@@ -1221,10 +1263,12 @@ def view_results(survey_id):
                          subjective_answers=subjective_data,
                          total_votes=total_votes,
                          unique_users=unique_users,
+                         submission_count=submission_count,
                          unique_respondents=unique_respondents,
                          total_questions=total_questions,
                          total_subjective_answers=total_subjective_answers,
-                         ranking_scores=ranking_scores)
+                         ranking_scores=ranking_scores,
+                         show_raw=show_raw)
 
 @app.route('/admin/download_results/<int:survey_id>')
 def download_results(survey_id):
@@ -1235,6 +1279,18 @@ def download_results(survey_id):
     survey = Survey.query.get_or_404(survey_id)
     if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
         abort(403)
+
+    if survey.type == 'ranking':
+        weighted_rows = _ranking_weighted_rows(survey_id)
+        if not weighted_rows:
+            flash('暂无加权统计数据可下载', 'warning')
+            return redirect(url_for('view_results', survey_id=survey_id))
+        safe_name = survey.name.replace('/', '-').replace('\\', '-')
+        return _send_ranking_excel(
+            weighted_rows,
+            f'ranking_weighted_{safe_name}.xlsx',
+            sheet_name='加权统计'
+        )
     
     # 创建原始数据
     data = []
@@ -1261,22 +1317,6 @@ def download_results(survey_id):
                 '选项': vote.score,
                 '时间': vote.created_at
             })
-    elif survey.type == 'ranking':
-        votes = Vote.query.join(Question).filter(
-            Question.survey_id == survey_id,
-            Vote.option_key.isnot(None)
-        ).all()
-        for vote in votes:
-            label = vote.option_key
-            if vote.question.custom_options and vote.option_key in vote.question.custom_options:
-                label = f"{vote.option_key}.{vote.question.custom_options[vote.option_key]}"
-            data.append({
-                '用户': vote.user.username,
-                '问题': vote.question.content.replace(' ', '-'),
-                '选项': label,
-                '名次': int(vote.score),
-                '时间': vote.created_at
-            })
     
     # 包含主观题回答
     subjective_answers = SubjectiveAnswer.query.filter_by(survey_id=survey_id).all()
@@ -1294,8 +1334,6 @@ def download_results(survey_id):
     columns = ['用户', '问题', '选项', '时间']
     if survey.type == 'table':
         columns.insert(2, '人名') # 在'问题'和'选项'之间插入'人名'
-    elif survey.type == 'ranking':
-        columns.insert(3, '名次')  # 在'选项'和'时间'之间插入'名次'
 
     # 创建DataFrame
     df = pd.DataFrame(data, columns=columns)
@@ -1363,36 +1401,6 @@ def download_results(survey_id):
             
             stats_df = pd.DataFrame(stats_data)
             stats_df.to_excel(writer, sheet_name='统计结果', index=False)
-            
-        elif survey.type == 'ranking':
-            sort_cols = []
-            if '问题' in df.columns:
-                sort_cols.append('问题')
-            if '选项' in df.columns:
-                sort_cols.append('选项')
-            if '名次' in df.columns:
-                sort_cols.append('名次')
-            df_sorted = df.sort_values(sort_cols) if sort_cols else df
-            df_sorted.to_excel(writer, sheet_name='按问题排列', index=False)
-
-            ranking_scores = compute_ranking_weighted_scores(survey_id)
-            weighted_rows = []
-            for block in ranking_scores:
-                q = block['question']
-                qname = q.content.replace(' ', '-')
-                for stat in block['option_stats']:
-                    row = {
-                        '问题': qname,
-                        '选项': stat['label'],
-                        '平均综合得分': stat['avg_score'],
-                        '作答人数': block['total_respondents'],
-                    }
-                    for rank, freq in sorted(stat['freq_by_rank'].items()):
-                        row[f'第{rank}名人数'] = freq
-                    weighted_rows.append(row)
-            if weighted_rows:
-                weighted_df = pd.DataFrame(weighted_rows)
-                weighted_df.to_excel(writer, sheet_name='加权统计', index=False)
     
     output.seek(0)
     
@@ -1401,6 +1409,45 @@ def download_results(survey_id):
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         as_attachment=True,
         download_name=f'vote_results_{survey.name}.xlsx'
+    )
+
+@app.route('/admin/download_ranking_raw/<int:survey_id>')
+def download_ranking_raw(survey_id):
+    guard = ensure_admin_session()
+    if guard:
+        return guard
+
+    survey = Survey.query.get_or_404(survey_id)
+    if int(getattr(survey, 'tenant_id', 1) or 1) != _current_admin_tenant_id() and not getattr(current_user, 'is_super_admin', False):
+        abort(403)
+    if survey.type != 'ranking':
+        abort(404)
+
+    data = []
+    for row in _collect_ranking_votes_data(survey_id):
+        data.append({
+            '用户': row['user'],
+            '问题': row['question'].replace(' ', '-'),
+            '选项': row['option'],
+            '名次': int(row['rank']),
+            '时间': row['time'],
+        })
+
+    if not data:
+        flash('暂无原始投票数据可下载', 'warning')
+        return redirect(url_for('view_results', survey_id=survey_id, show_raw=1))
+
+    df = pd.DataFrame(data, columns=['用户', '问题', '选项', '名次', '时间'])
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='原始数据', index=False)
+    output.seek(0)
+    safe_name = survey.name.replace('/', '-').replace('\\', '-')
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'ranking_raw_{safe_name}.xlsx'
     )
 
 @app.route('/admin/delete_results/<int:survey_id>', methods=['POST'])

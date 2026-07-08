@@ -196,7 +196,7 @@
                         <tr>
                             <th>选项</th>
                             <th>平均综合得分</th>
-                            {% set max_rank = block.question.rank_max or 4 %}
+                            {% set max_rank = block.max_rank or 1 %}
                             {% for r in range(1, max_rank + 1) %}
                             <th>第{{ r }}名人数</th>
                             {% endfor %}
